@@ -1,0 +1,9 @@
+xbrl.zip
+target
+data
+companies
+__pycache__
+venv
+.idea
+.DS_Store
+*.iml
