@@ -11,6 +11,7 @@ print("Total shareholders’ equity: " + str(gaap_obj.stockholders_equity))
 print("Total assets: " + str(gaap_obj.assets))
 print("Operating income: " + str(gaap_obj.operating_income_loss))
 print("Net income: " + str(gaap_obj.net_income_loss))
+print("Liabilities: " + str(gaap_obj.assets - gaap_obj.stockholders_equity))
 print("Total net sales: " + str(gaap_obj.revenues))
 
 dei_obj = xbrl_parser.parseDEI(xbrl)
