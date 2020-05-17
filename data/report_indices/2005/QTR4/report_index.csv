@@ -1,0 +1,17 @@
+Description:           XBRL Index of EDGAR Dissemination Feed
+Last Data Received:    December 31, 2005
+Comments:              webmaster@sec.gov
+Anonymous FTP:         ftp://ftp.sec.gov/edgar/
+ 
+ 
+ 
+ 
+CIK|Company Name|Form Type|Date Filed|Filename
+--------------------------------------------------------------------------------
+101829|UNITED TECHNOLOGIES CORP /DE/|8-K|2005-11-01|edgar/data/101829/0001193125-05-212986.txt
+101829|UNITED TECHNOLOGIES CORP /DE/|8-K|2005-12-22|edgar/data/101829/0001193125-05-247623.txt
+1067491|INFOSYS TECHNOLOGIES LTD|6-K|2005-12-01|edgar/data/1067491/0000891618-05-000891.txt
+1325945|Innophos Investment Holdings, Inc.|S-4|2005-11-23|edgar/data/1325945/0001193125-05-231927.txt
+789019|MICROSOFT CORP|8-K|2005-11-29|edgar/data/789019/0001193125-05-233350.txt
+790070|EMC CORP|8-K|2005-11-03|edgar/data/790070/0000950135-05-006199.txt
+796343|ADOBE SYSTEMS INC|10-Q|2005-10-05|edgar/data/796343/0001104659-05-047297.txt

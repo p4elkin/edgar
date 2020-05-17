@@ -1,0 +1,17 @@
+Description:           XBRL Index of EDGAR Dissemination Feed
+Last Data Received:    March 31, 2006
+Comments:              webmaster@sec.gov
+Anonymous FTP:         ftp://ftp.sec.gov/edgar/
+ 
+ 
+ 
+ 
+CIK|Company Name|Form Type|Date Filed|Filename
+--------------------------------------------------------------------------------
+101829|UNITED TECHNOLOGIES CORP /DE/|8-K|2006-02-08|edgar/data/101829/0001193125-06-023619.txt
+1106056|SATYAM COMPUTER SERVICES LTD|6-K|2006-03-27|edgar/data/1106056/0001145549-06-000399.txt
+1347402|IRON ACQUISITION CORP|SC TO-T/A|2006-02-23|edgar/data/1347402/0001047469-06-002361.txt
+352947|ENGELHARD CORP|SC TO-T/A|2006-02-23|edgar/data/352947/0001047469-06-002361.txt
+789019|MICROSOFT CORP|8-K|2006-03-10|edgar/data/789019/0001193125-06-050847.txt
+790070|EMC CORP|8-K|2006-03-27|edgar/data/790070/0000950135-06-001820.txt
+796343|ADOBE SYSTEMS INC|10-K|2006-02-08|edgar/data/796343/0001047469-06-001601.txt
