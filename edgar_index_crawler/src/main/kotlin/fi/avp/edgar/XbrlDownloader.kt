@@ -32,9 +32,10 @@ data class ReportRecord(val companyRef: CompanyRef,
                         val reportPath: String);
 
 fun main(args: Array<String>) {
-    val reportIndexLocation = Paths.get("").toAbsolutePath().parent.resolve("data/report_indices")
+    val parentDir = Paths.get("").toAbsolutePath().parent
+    val reportIndexLocation = parentDir.resolve("data/report_indices")
     val records = preparePerCompanyReportStorageStructure(reportIndexLocation)
-    val companyReportsLocation = Paths.get("").toAbsolutePath().parent.resolve("data/xbrl")
+    val companyReportsLocation = parentDir.resolve("data/xbrl")
 
     ensureDirectory(companyReportsLocation)
 
@@ -72,8 +73,8 @@ private fun fetchCompanyReports(
                         id.substring(0, id.length - 4)
                     }
 
-                    val xbrlUrl = "https://www.sec.gov/Archives/edgar/data/${record.companyRef.cik}/${reportId.replace("-", "")}/${reportId}-xbrl.zip"
-//                    val report = asyncGet("https://www.sec.gov/Archives/${record.reportPath}")
+                    val xbrlZipResourcePath = "${reportId.replace("-", "")}/${reportId}-xbrl.zip"
+                    val xbrlUrl = "${EDGAR_DATA}/${record.companyRef.cik}/${xbrlZipResourcePath}"
                     val report = asyncGet(xbrlUrl).byteStream()
 
                     val targetReportFile = quarterDir.resolve(generateRecordFileName(record))

@@ -11,6 +11,7 @@ import okhttp3.Request
 import java.nio.file.Files
 import java.nio.file.Paths
 
+const val EDGAR_DATA = "https://www.sec.gov/Archives/edgar/data/"
 const val EDGAR_INDEX_URL = "https://www.sec.gov/Archives/edgar/full-index/"
 const val REPORT_INDEX_FILE_NAME = "report_index.csv"
 
