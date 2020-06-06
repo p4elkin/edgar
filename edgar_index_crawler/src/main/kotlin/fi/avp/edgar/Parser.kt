@@ -3,6 +3,7 @@ package fi.avp.edgar
 import fi.avp.edgar.data.ReportRecord
 import fi.avp.util.Locations
 import fi.avp.util.companyQuarterlyReport
+import fi.avp.util.find
 import fi.avp.util.preparePerCompanyReportStorageStructure
 import org.w3c.dom.Document
 import org.w3c.dom.Node
@@ -38,32 +39,24 @@ fun main(args: Array<String>) {
     }
 }
 
-
 class XbrlParser(val content: InputStream, val reportRecord: ReportRecord, val isInlineXbrl: Boolean = false) {
 
-    val xpath = XPathFactory.newInstance().newXPath();
+    private val xpath = XPathFactory.newInstance().newXPath();
 
-    val parsedXml: Document by lazy {
+    private val parsedXml: Document by lazy {
         val documentBuilderFactory = DocumentBuilderFactory.newInstance()
         documentBuilderFactory.isNamespaceAware = true
-        val documentBuilder = documentBuilderFactory.newDocumentBuilder()
-        val document = documentBuilder.parse(content)
-        document
+        documentBuilderFactory.newDocumentBuilder().parse(content)
 
     }
 
-
-    fun resolveAttrNodes(attrId: String): NodeList {
-        return if (isInlineXbrl) {
-            xpath.compile("//*[@name ='$attrId']").evaluate(parsedXml, XPathConstants.NODESET) as NodeList
-        } else {
-            xpath.compile("//$attrId").evaluate(parsedXml, XPathConstants.NODESET) as NodeList
-        }
+    private fun resolveAttrNodes(attrId: String): NodeList {
+        val selector = if (isInlineXbrl) "//*[@name ='$attrId']" else "//$attrId"
+        return xpath.compile(selector).evaluate(parsedXml, XPathConstants.NODESET) as NodeList
     }
 
     fun parseReport(reportRecord: ReportRecord) {
         val netCashBlaBla = resolveAttrNodes("us-gaap:NetCashProvidedByUsedInOperatingActivities");
-
         val totalAssets =
 //            attributeValuesToContext("us-gaap:Assets")
             attributeValuesToContext("us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax")
@@ -80,10 +73,8 @@ class XbrlParser(val content: InputStream, val reportRecord: ReportRecord, val i
     }
 
     data class Context(val id: String, val startDate: LocalDate, val endDate: LocalDate, val isInstant: Boolean = false, val segment: String? = null) {
-        val Duration: Long
+        val duration: Long
             get() = java.time.Duration.between(startDate.atStartOfDay(), endDate.atStartOfDay()).toDays()
-
-
     }
 
 
@@ -95,8 +86,7 @@ class XbrlParser(val content: InputStream, val reportRecord: ReportRecord, val i
         }
     }
 
-
-    fun contextById(id: String): Context? {
+    private fun contextById(id: String): Context? {
         val ctxNode = xpath.compile("//*[local-name()='context' and @id='$id']").evaluate(parsedXml, XPathConstants.NODE) as Node?
         val period = ctxNode?.find("period")
         val segment = ctxNode?.find("entity")?.find("segment")?.textContent
@@ -108,15 +98,5 @@ class XbrlParser(val content: InputStream, val reportRecord: ReportRecord, val i
 
             Context(id, LocalDate.parse(startDate?.textContent), LocalDate.parse(endDate?.textContent), instant != null, segment)
         }
-    }
-
-    fun Node.find(name: String): Node? {
-        for (i in 0..childNodes.length) {
-            val node = childNodes.item(i)
-            if (node?.localName == name) {
-                return node
-            }
-        }
-        return null;
     }
 }
