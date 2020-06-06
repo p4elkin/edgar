@@ -20,9 +20,6 @@ import javax.xml.xpath.XPathFactory
 data class ReportData(val assets: Int)
 
 fun main(args: Array<String>) {
-    val targetSample =
-        Locations.xbrlDir.resolve("amazon_com_inc/2020/QTR2/amazon_com_inc-10-Q-QTR2-2020-05-010001018724-20-000010-xbrl/amzn-20200331x10q.htm")
-            .toFile()
 
     val reports = preparePerCompanyReportStorageStructure();
     reports.filterKeys { it.name == "apple_inc" }.forEach { (company, annualData) ->
@@ -34,10 +31,7 @@ fun main(args: Array<String>) {
                     val companyQuarterlyReport = companyQuarterlyReport(reportRecord)
                     companyQuarterlyReport?.let {
                         val isInlineXbrl = it.fileName.toString().endsWith(".htm")
-//                        println(companyQuarterlyReport)
                         XbrlParser(Files.newInputStream(it), reportRecord, isInlineXbrl).parseReport(reportRecord)
-//                        println()
-//                        println()
                     }
             }
         }
@@ -46,29 +40,6 @@ fun main(args: Array<String>) {
 
 
 class XbrlParser(val content: InputStream, val reportRecord: ReportRecord, val isInlineXbrl: Boolean = false) {
-
-    class NamespaceCtx(val usGaapNamespaceUri: String): NamespaceContext {
-        override fun getNamespaceURI(prefix: String?): String {
-            return when (prefix) {
-                "us-gaap" -> usGaapNamespaceUri
-                else -> "http://www.xbrl.org/2003/instance"
-            }
-        }
-
-        override fun getPrefix(namespaceURI: String?): String? {
-            return null
-        }
-
-        override fun getPrefixes(namespaceURI: String?): MutableIterator<Any?> {
-            return object : MutableIterator<Any?> {
-                override fun hasNext() = false
-
-                override fun next(): Any? = null
-
-                override fun remove() {}
-            }
-        }
-    }
 
     val xpath = XPathFactory.newInstance().newXPath();
 
@@ -79,10 +50,6 @@ class XbrlParser(val content: InputStream, val reportRecord: ReportRecord, val i
         val document = documentBuilder.parse(content)
         document
 
-    }
-
-    init {
-        xpath.namespaceContext = NamespaceCtx(parsedXml.lookupNamespaceURI("us-gaap"))
     }
 
 
