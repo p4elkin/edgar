@@ -78,7 +78,6 @@ fun main(args: Array<String>) {
     val reportCollection: MongoCollection<ReportRecord> = database.getCollection("reports", ReportRecord::class.java)
 
     records.toList()
-        .dropWhile { it.first.name != "sherwin_williams_co" }
         .forEach { (companyRef, yearlyReports) ->
             repeat(3) {
                 try {
