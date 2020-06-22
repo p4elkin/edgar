@@ -1,18 +1,23 @@
 package fi.avp.edgar
 
-import fi.avp.util.asyncGet
-import fi.avp.util.asyncGetText
-import fi.avp.util.mapAsync
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.runBlocking
+import com.mongodb.client.MongoCollection
+import fi.avp.edgar.data.CompanyRef
+import fi.avp.edgar.data.ReportMetadata
+import fi.avp.edgar.data.ValueUnit
+import fi.avp.util.*
+import kotlinx.coroutines.*
+import org.bson.codecs.pojo.annotations.BsonId
+import org.bson.codecs.pojo.annotations.BsonProperty
+import org.litote.kmongo.Id
+import org.litote.kmongo.KMongo
+import org.litote.kmongo.getCollection
+import org.litote.kmongo.newId
 import java.io.InputStream
 import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.Paths
+import java.time.LocalDate
+import java.time.LocalDateTime
 import java.util.regex.Pattern
-import java.util.stream.Collectors.toList
 
 val reportEntryPattern: Pattern = Pattern.compile("(\\d+)?\\|(.+)?\\|(10-K|10-Q)?\\|(.+)?\\|(.+\\.txt)")
 
@@ -21,97 +26,161 @@ val sp500List = Thread.currentThread().contextClassLoader
     ?.readText()
     ?.lines() ?: emptyList()
 
-data class CompanyRef(val cik: String,
-                      val name: String)
 
-data class ReportRecord(val companyRef: CompanyRef,
-                        val year: String,
-                        val quarter: String,
-                        val reportType: String,
-                        val date: String,
-                        val reportPath: String);
+data class ReportData(
+    val metadata: ReportMetadata,
+    val extracts: Map<String, String>,
+    val reportFile: String,
+    val xbrlData: InputStream?) {
+
+    fun toRecord() = ReportRecord(
+        metadata.companyRef.cik,
+        metadata.companyRef.name,
+        metadata.getReportId(),
+        metadata.reportType,
+        metadata.date.toLocalDate(),
+        metadata.getReportDataURL(),
+        reportFile,
+        emptyList(),
+        extracts)
+}
+
+data class Metric(
+    @BsonProperty(value = "type")
+    val type: String,
+    val category: String,
+    val value: String,
+    val unit: ValueUnit,
+    val contextId: String,
+    val sourcePropertyName: String)
+
+data class ReportRecord(
+    val cik: String,
+    val name: String,
+    @BsonId val _id: String,
+    val type: String,
+    val date: LocalDate,
+    val dataUrl: String,
+    val reportFileName: String,
+    val metrics: List<Metric>?,
+    val extracts: Map<String, String>
+)
 
 fun main(args: Array<String>) {
-    val parentDir = Paths.get("").toAbsolutePath().parent
-    val reportIndexLocation = parentDir.resolve("data/report_indices")
+    val reportIndexLocation = Locations.indicesDir
     val records = preparePerCompanyReportStorageStructure(reportIndexLocation)
-    val companyReportsLocation = parentDir.resolve("data/xbrl")
+    val companyReportsLocation = Locations.xbrlDir
 
     ensureDirectory(companyReportsLocation)
 
-    records.forEach { (companyRef, yearlyReports) ->
-        fetchCompanyReports(companyRef, companyReportsLocation, yearlyReports)
-    }
+    val client = KMongo.createClient() //get com.mongodb.MongoClient new instance
+    val database = client.getDatabase("sec-report") //normal java driver usage
+    val reportCollection: MongoCollection<ReportRecord> = database.getCollection("reports", ReportRecord::class.java)
+
+    records.toList()
+        .dropWhile { it.first.name != "sherwin_williams_co" }
+        .forEach { (companyRef, yearlyReports) ->
+            repeat(3) {
+                try {
+                    val companyReports = fetchCompanyReports(companyRef, companyReportsLocation, yearlyReports).map { it.toRecord() }
+                    reportCollection.insertMany(companyReports)
+                    return@forEach
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
 }
+
+typealias DownloadTask = suspend CoroutineScope.() -> ReportData
 
 private fun fetchCompanyReports(
     companyRef: CompanyRef,
     companyReportsLocation: Path,
-    yearlyReports: Map<String, Map<String, List<ReportRecord>>>) {
+    reportMetadataByYear: Map<String, Map<String, List<ReportMetadata>>>) : List<ReportData> {
 
     println("processing ${companyRef.name}")
     val companyDir = companyReportsLocation.resolve(companyRef.name)
-    if (Files.exists(companyDir)) {
-        println("data exists skipping...")
-        return
-    }
 
     ensureDirectory(companyDir)
 
-    val downloadTasks = ArrayList<suspend CoroutineScope.() -> Pair<Path, InputStream>>()
-    yearlyReports.forEach { (year, quarterlyReports) ->
+    val downloadTasks = ArrayList<DownloadTask>()
+    reportMetadataByYear.forEach { (year, quarterlyReports) ->
         val yearDirectory = companyDir.resolve(year)
         ensureDirectory(yearDirectory)
 
         quarterlyReports.forEach { (quarterId, records) ->
             val quarterDir = yearDirectory.resolve(quarterId)
             ensureDirectory(quarterDir)
-            records.forEach { record ->
-                downloadTasks.add {
-                    val reportId = record.reportPath.let {
-                        val id = it.substringAfterLast("/")
-                        id.substring(0, id.length - 4)
-                    }
-
-                    val xbrlZipResourcePath = "${reportId.replace("-", "")}/${reportId}-xbrl.zip"
-                    val xbrlUrl = "${EDGAR_DATA}/${record.companyRef.cik}/${xbrlZipResourcePath}"
-                    val report = asyncGet(xbrlUrl).byteStream()
-
-                    val targetReportFile = quarterDir.resolve(generateRecordFileName(record))
-                    println("downloading $xbrlUrl, waiting...")
-
-                    return@add targetReportFile to report
-                }
+            records.forEach {
+                downloadTasks.add { createDownloadTask(it, quarterDir) }
             }
         }
     }
 
     println("downloading ${downloadTasks.count()} documents")
-    runBlocking {
-        var progress = 0
-        downloadTasks
-            .groupBy { downloadTasks.indexOf(it) / 50 }
-            .forEach {
-                it.value
-                    .mapAsync { it(this) }
-                    .awaitAll()
-                    .forEach { (filePath, reportContent) ->
-                        try {
-                            val outputStream = Files.createFile(filePath).toFile().outputStream()
-                            reportContent.copyTo(outputStream)
-                            outputStream.flush()
-                        } catch (e: Exception) {
-                            e.printStackTrace()
-                        }
-                    }
-
-                progress += it.value.size
-                println("downloaded $progress, waiting...")
-                delay(3000)
-            }
+    return runBlocking {
+        val results = runDownloadTasks(downloadTasks)
+        delay(3000)
+        results
     }
-    println()
 }
+
+private suspend fun runDownloadTasks(downloadTasks: ArrayList<DownloadTask>): List<ReportData> {
+    return downloadTasks.mapAsync { it(this) }.awaitAll()
+}
+
+private fun saveXBRLZip(filePath: Path, reportContent: InputStream?) {
+    if (Files.exists(filePath)) {
+        return
+    }
+
+    val reportFile = Files.createFile(filePath)
+    reportContent?.let {
+        try {
+            reportFile.toFile().outputStream().use {
+                reportContent.copyTo(it)
+                it.flush()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        } finally {
+            reportContent.close()
+        }
+    }
+}
+
+
+private suspend fun createDownloadTask(metadata: ReportMetadata, quarterDir: Path): ReportData {
+    val reportBaseUrl = metadata.getReportDataURL()
+    val index = asyncJson("$reportBaseUrl/index.json")
+
+    val reportNode = index["directory"]["item"]
+        .filter { it.text("name").endsWith(".htm") }
+        .maxBy { it.long("size") }
+    val humanReadableReportFileName = reportNode?.text("name") ?: ""
+
+    val filingSummary = FilingSummary(asyncGet("$reportBaseUrl/FilingSummary.xml").byteStream())
+
+    val reports = mapOf(
+        "cashFlow" to filingSummary.getConsolidatedStatementOfCashFlow(),
+        "income" to filingSummary.getConsolidatedStatementOfIncome(),
+        "balance" to filingSummary.getConsolidatedBalanceSheet(),
+        "operations" to filingSummary.getConsolidatedStatementOfOperation()
+    ).filterValues {
+        it != null
+    }.mapValues {
+        asyncGetText("$reportBaseUrl/${it.value!!}")
+    }
+//    val xbrlUrl = "$reportBaseUrl/${reportId}-xbrl.zip"
+//    val report = asyncGet(xbrlUrl).byteStream()
+
+//    val targetReportFile = quarterDir.resolve(generateRecordFileName(metadata))
+//    println("downloading $xbrlUrl, waiting...")
+
+    return ReportData(metadata, reports, humanReadableReportFileName, null)
+}
+
 
 private fun ensureDirectory(path: Path) {
     if (!Files.exists(path)) {
@@ -119,51 +188,6 @@ private fun ensureDirectory(path: Path) {
     }
 }
 
-private fun preparePerCompanyReportStorageStructure(reportIndexLocation: Path): Map<CompanyRef, Map<String, Map<String, List<ReportRecord>>>> {
-    val cikToCompanyName:  MutableMap<String, String> = HashMap()
-    return Files.newDirectoryStream(reportIndexLocation)
-        .filter { Files.isDirectory(it) }
-        .flatMap { yearIndexDirectory ->
-            Files.newDirectoryStream(yearIndexDirectory)
-                .filter { Files.isDirectory(it) }
-                .map { quarterDirectory ->
-                    Files.newBufferedReader(quarterDirectory.resolve(REPORT_INDEX_FILE_NAME))
-                        .lines()
-                        .map { reportEntryPattern.matcher(it) }
-                        .filter { it.matches() }
-                        .map {
-                            val cik = it.group(1).padStart(10, '0');
-                            val name = cikToCompanyName.getOrPut(cik, { sanitiseCompanyName(it.group(2)) })
-                            ReportRecord(
-                                year = yearIndexDirectory.fileName.toString(),
-                                quarter = quarterDirectory.fileName.toString(),
-                                companyRef = CompanyRef(cik, name),
-                                reportType = it.group(3),
-                                date = it.group(4),
-                                reportPath = it.group(5)
-                            )
-                        }.collect(toList())
-                }
-        }
-        .flatten()
-        .sortedBy { it.companyRef.name }
-        .groupBy { it.companyRef }
-        .mapValues {
-            it.value
-                .groupBy { it.year }
-                .mapValues {
-                    it.value
-                        .groupBy { it.quarter }
-                }
-        }
-        .filterKeys { sp500List.contains(it.cik) }
-}
-
-private fun sanitiseCompanyName(it: String) =
-    it.replace(Regex("[\\.\\,\\'\\/]"), "")
-      .replace(" ", "_")
-      .toLowerCase()
-
-fun generateRecordFileName(record: ReportRecord): String =
-    "${record.companyRef.name}-${record.reportType}-${record.quarter}-${record.date}${record.reportPath.substringAfterLast("/")}".replace(".txt", "-xbrl.zip")
+fun generateRecordFileName(metadata: ReportMetadata): String =
+    "${metadata.companyRef.name}-${metadata.companyRef.cik}-${metadata.reportType}-${metadata.quarter}-${metadata.date}-${metadata.reportPath.substringAfterLast("/")}".replace(".txt", "-xbrl.zip")
 

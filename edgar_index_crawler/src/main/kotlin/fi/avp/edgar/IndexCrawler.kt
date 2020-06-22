@@ -17,7 +17,7 @@ const val REPORT_INDEX_FILE_NAME = "report_index.csv"
 
 data class QuarterIndex(val year: String, val quarterId: String, val xbrlData: String)
 
-fun main(args: Array<String>) {
+fun main() {
     val index = runBlocking {
         // fetch the root structure of the EDGAR database
         val yearlyIndices = crawl()["directory"]["item"]

@@ -28,6 +28,7 @@ suspend fun awaitCallback(block: (Callback) -> Unit) : ResponseBody =
         })
     }
 
+
 suspend fun asyncJson(request: Request): JsonNode {
     val response: ResponseBody = awaitCallback {
         client
@@ -36,6 +37,22 @@ suspend fun asyncJson(request: Request): JsonNode {
                     .url(request.url.newBuilder().build())
                     .build()
             )
+            .enqueue(it)
+    }
+
+    return try {
+        objectMapper.readTree(response.string()) } catch (e: Exception) {
+        throw RuntimeException(e)
+    }
+}
+
+suspend fun asyncJson(request: String): JsonNode {
+    val response: ResponseBody = awaitCallback {
+        client
+            .newCall(
+                Request.Builder()
+                    .url(request)
+                    .build())
             .enqueue(it)
     }
 
