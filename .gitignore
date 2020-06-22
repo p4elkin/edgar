@@ -7,3 +7,6 @@ venv
 .idea
 .DS_Store
 *.iml
+xbrl_parser
+iex_data
+create-react-app
