@@ -38,7 +38,7 @@ open class FilingSummary(private val summaryStream: InputStream) {
     }
 
     fun getConsolidatedStatementOfIncome(): String? {
-        return findReportRefNode("statement of income") ?: findReportRefNode("")
+        return findReportRefNode("of income") ?: findReportRefNode("")
     }
 
     fun getConsolidatedBalanceSheet(): String? {
@@ -51,6 +51,10 @@ open class FilingSummary(private val summaryStream: InputStream) {
 
     fun getConsolidatedStatementOfCashFlow(): String? {
         return findReportRefNode("cash flow")
+    }
+
+    fun getFinancialSummary(): String? {
+        return findReportRefNode("financial summary")
     }
 
     private fun findReportRefNode(title: String): String? {

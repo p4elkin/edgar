@@ -66,29 +66,9 @@ data class ReportRecord(
     val extracts: Map<String, String>
 )
 
-fun main(args: Array<String>) {
-    val reportIndexLocation = Locations.indicesDir
-    val records = preparePerCompanyReportStorageStructure(reportIndexLocation)
-    val companyReportsLocation = Locations.xbrlDir
-
-    ensureDirectory(companyReportsLocation)
-
-    val client = KMongo.createClient() //get com.mongodb.MongoClient new instance
-    val database = client.getDatabase("sec-report") //normal java driver usage
+fun main() {
     val reportCollection: MongoCollection<ReportRecord> = database.getCollection("reports", ReportRecord::class.java)
 
-    records.toList()
-        .forEach { (companyRef, yearlyReports) ->
-            repeat(3) {
-                try {
-                    val companyReports = fetchCompanyReports(companyRef, companyReportsLocation, yearlyReports).map { it.toRecord() }
-                    reportCollection.insertMany(companyReports)
-                    return@forEach
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            }
-        }
 }
 
 typealias DownloadTask = suspend CoroutineScope.() -> ReportData
