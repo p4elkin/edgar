@@ -1,14 +1,21 @@
 package fi.avp.edgar
 
-import fi.avp.edgar.data.ReportMetadata
+import com.mongodb.client.MongoCollection
 import fi.avp.util.*
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
-import org.litote.kmongo.Data
 import org.litote.kmongo.find
 import org.litote.kmongo.save
-import java.nio.file.Path
+import org.litote.kmongo.updateOne
+import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
+import java.io.FileOutputStream
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.nio.file.Paths
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 fun ensureCikPaddingsInTickerMappings() {
     val updated = Database.ticker.find().map {
@@ -55,6 +62,75 @@ fun resolveFileNames() {
         }
     }
 }
+
+fun downloadReports() {
+    val reports = Database.reportIndex.find().toList()
+    reports.groupBy { it.ticker }.filter { it.key != null && !Files.exists(Paths.get("/Users/sasha/Desktop/reports/${it.key}.zip")) }.forEach { companyReports ->
+        println("Downloading ${companyReports.key}")
+        repeat(3) {
+            try {
+                runBlocking {
+                    val downloadedStuff = companyReports.value.filter { it.reportFiles != null }
+                        .mapAsync { reportReference ->
+                            download(reportReference)
+                        }.awaitAll()
+                        .filterNotNull()
+
+                    if (downloadedStuff.isNotEmpty()) {
+                        saveReports(companyReports.key!!, downloadedStuff)
+                        delay(1000)
+                    }
+                }
+                return@forEach
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+}
+
+fun saveReports(ticker: String, xbrls: List<XBRL>) {
+    ZipOutputStream(BufferedOutputStream(FileOutputStream("/Users/sasha/Desktop/reports/${ticker}.zip"))).use { out ->
+        xbrls.forEach { entry ->
+            entry.xbrl?.let {
+                BufferedInputStream(it.byteInputStream(StandardCharsets.UTF_8)).use { origin ->
+                    val zipEntry = ZipEntry("${entry.dataUrl.substringAfterLast("/")}.xml")
+                    out.putNextEntry(zipEntry)
+                    origin.copyTo(out, 1024)
+                }
+
+            }
+        }
+    }
+}
+
+fun __amendFinancingOperationRelatedMetrics(collection: MongoCollection<ReportRecord>) {
+    getCompanyNames().filter { it == "apple_inc" }.forEach {
+        val escapedName = it.replace("\\", "\\\\")
+        collection.find("{name: '$escapedName'}").forEach { report ->
+            if (report.metrics == null) {
+                println("${report.name} ${report._id} ${report.dataUrl}")
+            }
+            val updatedMetrics = report.metrics?.map {
+                if (it.sourcePropertyName == "NetCashProvidedByUsedInFinancingActivitiesContinuingOperations" ||
+                    it.sourcePropertyName == "NetCashProvidedByUsedInFinancingActivities") {
+                    it.copy(category = "cashFlow", type = "financingCashFlow")
+                } else {
+                    it
+                }
+            }
+
+            collection.updateOne(report.copy(metrics = updatedMetrics))
+        }
+    }
+}
+
+suspend fun download(reportReference: ReportReference): XBRL? {
+    return reportReference.reportFiles?.xbrlReport?.let {
+        XBRL(reportReference.dataUrl!!, asyncGetText("${reportReference.dataUrl}/$it"))
+    }
+}
+
 
 data class ReportFiles(
     val visualReport: String?,
@@ -120,6 +196,7 @@ fun updateDataUrl() {
 }
 
 fun main() {
-    resolveFileNames()
+//    resolveFileNames()
+    downloadReports()
 }
 
