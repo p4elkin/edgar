@@ -1,23 +1,19 @@
 package fi.avp.edgar
 
-import com.fasterxml.jackson.core.JsonParser
-import com.fasterxml.jackson.databind.DeserializationContext
-import com.fasterxml.jackson.databind.JsonDeserializer
-import com.fasterxml.jackson.databind.JsonNode
-import com.fasterxml.jackson.databind.annotation.JsonDeserialize
-import com.fasterxml.jackson.datatype.jsr310.deser.LocalDateDeserializer
-import org.bson.codecs.pojo.annotations.BsonProperty
 import org.litote.kmongo.KMongo
 import java.time.LocalDate
-import java.time.format.DateTimeFormatter
 
 object Database {
     val client = KMongo.createClient() //get com.mongodb.MongoClient new instance
     val database = client.getDatabase("sec-report") //normal java driver usage
     val reports = database.getCollection("reports", ReportRecord::class.java)
     val reportIndex = database.getCollection("report-index", ReportReference::class.java)
+    val xbrl = database.getCollection("xbrl", XBRL::class.java)
     val ticker = database.getCollection("ticker", TickerMapping::class.java)
 }
+
+
+data class XBRL(val dataUrl: String, val xbrl: String?)
 
 data class ReportReference(
     val _id: String,
@@ -39,8 +35,6 @@ data class ReportReference(
 
         dataUrl = "$EDGAR_DATA${cik}/${reportId?.replace("-", "")}"
     }
-
-
 }
 
 data class TickerMapping(val _id: String, val ticker: String, val cik: String)
