@@ -11,16 +11,15 @@ import fi.avp.util.mapAsync
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 import org.bson.Document
-import org.litote.kmongo.*
+import org.litote.kmongo.aggregate
+import org.litote.kmongo.findOne
 import java.lang.Exception
 import java.time.LocalDate
 
-val client = KMongo.createClient() //get com.mongodb.MongoClient new instance
-val database = client.getDatabase("sec-report") //normal java driver usage
-val reportData = database.getCollection("reports", ReportRecord::class.java)
-val annualReportSeries = database.getCollection("annual")
-val company = database.getCollection("companies")
-val quarterlyReportSeries = database.getCollection("quarterly")
+val reportData = Database.reports
+val annualReportSeries = Database.database.getCollection("annual")
+val company = Database.database.getCollection("companies")
+val quarterlyReportSeries = Database.database.getCollection("quarterly")
 
 fun main() {
     quarterlyReportSeries.drop()

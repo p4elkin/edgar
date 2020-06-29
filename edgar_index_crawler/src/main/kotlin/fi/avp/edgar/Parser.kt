@@ -1,106 +1,150 @@
 package fi.avp.edgar
 
-import com.mongodb.client.MongoCollection
-import fi.avp.edgar.data.*
+import fi.avp.edgar.data.PropertyDescriptor
+import fi.avp.edgar.data.ReportMetadata
+import fi.avp.edgar.data.attrNames
 import fi.avp.util.mapAsync
 import kotlinx.coroutines.*
 import org.bson.codecs.pojo.annotations.BsonId
-import org.litote.kmongo.*
+import org.bson.codecs.pojo.annotations.BsonProperty
+import org.litote.kmongo.eq
+import org.litote.kmongo.setTo
+import org.litote.kmongo.updateOne
+import java.nio.charset.StandardCharsets
+import java.nio.file.Path
+import java.time.LocalDate
 import java.util.concurrent.Executors
 
+data class Metric(
+    @BsonProperty(value = "type")
+    val type: String,
+    val category: String,
+    val value: String,
+    val unit: ValueUnit?,
+    val contextId: String,
+    val sourcePropertyName: String)
+
+data class ReportRecord(
+    val cik: String,
+    val name: String,
+    @BsonId val _id: String,
+    val type: String,
+    val date: LocalDate,
+    val dataUrl: String,
+    val reportFileName: String,
+    val relatedContexts: List<Context> = emptyList(),
+    val metrics: List<Metric>?,
+    val extracts: Map<String, String>
+)
+
 fun main() {
-    val client = KMongo.createClient() //get com.mongodb.MongoClient new instance
-    val database = client.getDatabase("sec-report") //normal java driver usage
-    val collection = database.getCollection("reports", ReportRecord::class.java)
-
     runBlocking {
-        getCompanyNames().filter { it == "cbre_group_inc" }.forEach {
-            resolveMetrics(it).forEach { (metadata, properties) ->
-                println("saving ${metadata.companyRef.name} for ${metadata.date}")
-                val metrics = properties.flatMap { propertyData ->
-                    val descriptor = propertyData.propertyDescriptor
-                    propertyData.resolvedNodes.map {
-                        Metric(
-                            descriptor.id,
-                            descriptor.category,
-                            it.value,
-                            it.unit!!,
-                            it.context.id,
-                            it.attrId)
-                    }
-                }
-
-                collection.updateOne(
-                    ReportRecord::_id eq metadata.getReportId(),
-                    ReportRecord::metrics setTo metrics)
-            }
-        }
+//        getCompanyNames().filter { it == "apple_inc" }.forEach {
+//            resolveMetrics(it).forEach { (metadata, properties) ->
+//                println("saving ${metadata.companyRef.name} for ${metadata.date}")
+//                val metrics = properties.flatMap { propertyData ->
+//                    val descriptor = propertyData.descriptor
+//                    propertyData.extractedValues.map {
+//                        Metric(
+//                            descriptor.id,
+//                            descriptor.category,
+//                            it.value,
+//                            it.unit,
+//                            it.context.id,
+//                            it.propertyId)
+//                    }
+//                }
+//
+//                Database.reports.updateOne(ReportRecord::_id eq metadata.getReportId(), ReportRecord::metrics setTo metrics)
+//            }
+//        }
+        val parseReports = parseReports("AAPL")
+        parseReports
     }
 }
 
-private fun __amendFinancingOperationRelatedMetrics(collection: MongoCollection<ReportRecord>) {
-    getCompanyNames().filter { it == "apple_inc" }.forEach {
-        val escapedName = it.replace("\\", "\\\\")
-        collection.find("{name: '$escapedName'}").forEach { report ->
-            if (report.metrics == null) {
-                println("${report.name} ${report._id} ${report.dataUrl}")
-            }
-            val updatedMetrics = report.metrics?.map {
-                if (it.sourcePropertyName == "NetCashProvidedByUsedInFinancingActivitiesContinuingOperations" ||
-                    it.sourcePropertyName == "NetCashProvidedByUsedInFinancingActivities") {
-                    it.copy(category = "cashFlow", type = "financingCashFlow")
-                } else {
-                    it
-                }
-            }
+suspend fun parseReports(ticker: String): List<Pair<ReportReference, List<PropertyData>>?> {
+        val reportReferences = Database.getReportReferences(ticker)
+        val reportData = getCompanyReports(ticker)
 
-            collection.updateOne(report.copy(metrics = updatedMetrics))
-        }
-    }
+        return reportReferences.mapAsync { reportReference ->
+            val data = reportData["${reportReference.reference}.xml"]
+            data?.let {
+                val report = Report(
+                    it.byteInputStream(StandardCharsets.UTF_8),
+                    reportReference.dateFiled?.atStartOfDay()!!,
+                    reportReference.formType!!)
+
+                val resolvedData = attrNames.map { report.resolveProperty(it) }
+                val contexts = getNonAmbiguousContexts(resolvedData)
+                val extractedProperties = disambiguateProperties(contexts, resolvedData)
+                val allProps = contexts.flatMap {
+                    report.extractAllPropertiesForContext(it.id)
+                }.map {
+                    PropertyData(PropertyDescriptor(
+                        variants = listOf(it.propertyId),
+                        id = it.propertyId,
+                        category = "misc"
+                    ), listOf(it))
+                }
+                reportReference to allProps
+            }
+        }.awaitAll()
 }
 
 val coroutineDispatcher: CoroutineDispatcher = Executors.newFixedThreadPool(16).asCoroutineDispatcher()
 suspend fun resolveMetrics(companyName: String) = coroutineScope {
     withContext(coroutineDispatcher) {
         streamCompanyReports(companyName).mapAsync { (metadata, file) ->
-            val path = file.toAbsolutePath().toString()
-            println(path)
-            val content = file.toFile().inputStream()
-            content.use {
-                val report = Report(it, path.endsWith(".htm"), metadata)
-                val resolvedData = attrNames.map { report.resolveProperty(it) }
-                metadata to disambiguateProperties(resolvedData)
-            }
+            extractMetrics(file, metadata)
         }.awaitAll()
     }.toMap()
 }
 
-fun disambiguateProperties(resolvedData: List<ResolvedPropertyData>): List<ResolvedPropertyData> {
-    val nonAmbiguousContexts = getNonAmbiguousContexts(resolvedData)
-    return resolvedData.map {
-        val contexts = it.resolvedNodes.map { it.context }.toSet()
+private fun extractMetrics(file: Path, metadata: ReportMetadata): Pair<ReportMetadata, List<PropertyData>> {
+    return file.toFile().inputStream().use {
+        val report = Report(it, metadata.date, metadata.reportType)
+        val resolvedData = attrNames.map { report.resolveProperty(it) }
+        val contexts = getNonAmbiguousContexts(resolvedData)
+        val extractedProperties = disambiguateProperties(contexts, resolvedData)
+        val allProps = contexts.flatMap {
+            report.extractAllPropertiesForContext(it.id)
+        }.map {
+            PropertyData(PropertyDescriptor(
+                variants = listOf(it.propertyId),
+                id = it.propertyId,
+                category = "misc"
+            ), listOf(it))
+        }
+
+        metadata to extractedProperties.plus(allProps)
+    }
+}
+
+fun disambiguateProperties(nonAmbiguousContexts: Set<Context>, data: List<PropertyData>): List<PropertyData> {
+    return data.map {
+        val contexts = it.extractedValues.map { it.context }.toSet()
         var contextSet = contexts.filter { nonAmbiguousContexts.contains(it) }
         if (contextSet.isEmpty()) {
             contextSet = contexts.filter { it.segment == null }
         }
 
-        val filteredValues = it.resolvedNodes.filter {
+        val filteredValues = it.extractedValues.filter {
             it.context in contextSet
         }
 
-        ResolvedPropertyData(
-            it.propertyDescriptor,
-            filteredValues,
-            it.alternatives
+        PropertyData(
+            it.descriptor,
+            filteredValues
         )
     }
 }
 
-private fun getNonAmbiguousContexts(props: List<ResolvedPropertyData>): Set<Context> {
+fun getNonAmbiguousContexts(props: List<PropertyData>): Set<Context> {
     return props.filter {
-        it.resolvedNodes.groupBy { it.attrId }.all { it.value.size == 1 }
+        it.extractedValues.groupBy { it.propertyId }.all { it.value.size == 1 }
     }.flatMap {
-        it.resolvedNodes.map { it.context }
+        it.extractedValues.map { it.context }
     }.toSet()
 }
 

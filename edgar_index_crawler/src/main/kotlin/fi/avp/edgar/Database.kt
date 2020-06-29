@@ -1,6 +1,7 @@
 package fi.avp.edgar
 
 import org.litote.kmongo.KMongo
+import org.litote.kmongo.find
 import java.time.LocalDate
 
 object Database {
@@ -9,10 +10,23 @@ object Database {
     val reports = database.getCollection("reports", ReportRecord::class.java)
     val reportIndex = database.getCollection("report-index", ReportReference::class.java)
     val xbrl = database.getCollection("xbrl", XBRL::class.java)
-    val ticker = database.getCollection("ticker", TickerMapping::class.java)
+    val tickers = database.getCollection("ticker", TickerMapping::class.java)
+    val sp500 = database.getCollection("s-and-p-500")
+
+    fun getSP500Tickers(): List<String> {
+        return sp500.distinct("ticker", String::class.java).toList()
+    }
+
+    fun getTickers(): List<String> {
+        return reportIndex.distinct("ticker", String::class.java).toList()
+    }
+
+    fun getReportReferences(ticker: String): List<ReportReference> {
+        return reportIndex.find("{ticker: '$ticker'}").toList()
+    }
 }
 
-
+data class TickerMapping(val _id: String, val ticker: String, val cik: String)
 data class XBRL(val dataUrl: String, val xbrl: String?)
 
 data class ReportReference(
@@ -25,8 +39,9 @@ data class ReportReference(
     val reportFile: String?,
     val ticker: String?,
     var dataUrl: String?,
-    val reportFiles: ReportFiles?
-) {
+    var reference: String?, // last segment of data URL
+    val reportFiles: ReportFiles?) {
+
     init {
         val reportId = fileName.let {
             val id = it?.substringAfterLast("/")
@@ -34,7 +49,7 @@ data class ReportReference(
         }
 
         dataUrl = "$EDGAR_DATA${cik}/${reportId?.replace("-", "")}"
+        reference = dataUrl?.substringAfterLast("/")
     }
 }
 
-data class TickerMapping(val _id: String, val ticker: String, val cik: String)

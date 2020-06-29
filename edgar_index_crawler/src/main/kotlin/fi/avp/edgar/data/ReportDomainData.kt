@@ -1,7 +1,6 @@
 package fi.avp.edgar.data
 
 import fi.avp.edgar.EDGAR_DATA
-import java.time.LocalDate
 import java.time.LocalDateTime
 
 data class CompanyRef(val cik: String,
@@ -30,67 +29,79 @@ data class ReportMetadata(val companyRef: CompanyRef,
 
 }
 
-data class ValueUnit(val id: String, val measure: String?, val divide: Pair<String, String>?)
-data class Period(val startDate: LocalDate, val endDate: LocalDate, val isInstant: Boolean = false) {
-    val duration: Long
-        get() = java.time.Duration.between(startDate.atStartOfDay(), endDate.atStartOfDay()).toDays()
-}
 
-data class Context(val id: String,  val period: Period?, val segment: String? = null)
-
-
-data class PropertyDescriptor(val variants: List<String>, val base: String, val id: String = "", val category: String = "")
+data class PropertyDescriptor(
+    val variants: List<String>,
+    val id: String = "",
+    val category: String = ""
+)
 val attrNames: List<PropertyDescriptor> = listOf(
-    PropertyDescriptor(listOf(
-        "Assets"
-    ), "Assets", "assets", "balance"),
-    PropertyDescriptor(listOf(
-        "StockholdersEquity",
-        "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"),
-        "Equity", "stockHolderEquity", "balance"),
-
-    PropertyDescriptor(listOf(
-//        "ElectricalDistributionRevenue",
-        "SegmentReportingInformationRevenue",
-        "RevenuesNetOfInterestExpense",
-        "ElectricalTransmissionAndDistributionRevenue",
-        "RevenueMineralSales",
-        "Revenues",
-        "OilAndGasRevenue",
-        "SalesRevenueGoodsNet",
-        "SalesRevenueNet",
-        "TotalRevenuesAndOtherIncome",
-        "RevenueFromContractWithCustomerIncludingAssessedTax",
-        "RevenueFromContractWithCustomerExcludingAssessedTax"
-    ), "Revenue", "revenue", "operations"),
-    PropertyDescriptor(listOf(
-        "ProfitLoss",
-        "NetIncomeLoss",
-        "NetIncomeLossAvailableToCommonStockholdersBasic"),
-        "Income", "netIncome", "operations"),
-    PropertyDescriptor(listOf(
-//        "IncreaseDecreaseInOtherOperatingCapitalNet",
-        "OperatingIncomeLoss",
-        "GrossProfit"
-//        "ComprehensiveIncomeLoss",
-//        "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments",
-//        "IncomeLossFromContinuingOperationsIncludingPortionAttributableToNoncontrollingInterest",
-//        "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest"
+    PropertyDescriptor(
+        listOf(
+            "Assets"
+        ), "assets", "balance"
     ),
-        "Income", "operatingIncome", "operations"),
+    PropertyDescriptor(
+        listOf(
+            "StockholdersEquity",
+            "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"),
+        "stockHolderEquity", "balance"
+    ),
 
-    PropertyDescriptor(listOf(
-        "NetCashProvidedByUsedInInvestingActivities",
-        "NetCashProvidedByUsedInInvestingActivitiesContinuingOperations"),
-        "NetCash", "investingCashFlow", "cashFlow"),
-    PropertyDescriptor(listOf(
-        "NetCashProvidedByUsedInOperatingActivities",
-        "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations"),
-        "NetCash", "operatingCashFlow", "cashFlow"),
-    PropertyDescriptor(listOf(
-        "NetCashProvidedByUsedInFinancingActivitiesContinuingOperations",
-        "NetCashProvidedByUsedInFinancingActivities"),
-        "NetCash", "financingCashFlow", "cashFlow")
+    PropertyDescriptor(
+        listOf(
+    //        "ElectricalDistributionRevenue",
+            "SegmentReportingInformationRevenue",
+            "RevenuesNetOfInterestExpense",
+            "ElectricalTransmissionAndDistributionRevenue",
+            "RevenueMineralSales",
+            "Revenues",
+            "OilAndGasRevenue",
+            "SalesRevenueGoodsNet",
+            "SalesRevenueNet",
+            "TotalRevenuesAndOtherIncome",
+            "RevenueFromContractWithCustomerIncludingAssessedTax",
+            "RevenueFromContractWithCustomerExcludingAssessedTax"
+        ), "revenue", "operations"
+    ),
+    PropertyDescriptor(
+        listOf(
+            "ProfitLoss",
+            "NetIncomeLoss",
+            "NetIncomeLossAvailableToCommonStockholdersBasic"),
+        "netIncome", "operations"
+    ),
+    PropertyDescriptor(
+        listOf(
+    //        "IncreaseDecreaseInOtherOperatingCapitalNet",
+            "OperatingIncomeLoss",
+            "GrossProfit"
+    //        "ComprehensiveIncomeLoss",
+    //        "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments",
+    //        "IncomeLossFromContinuingOperationsIncludingPortionAttributableToNoncontrollingInterest",
+    //        "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest"
+        ),
+        "operatingIncome", "operations"
+    ),
+
+    PropertyDescriptor(
+        listOf(
+            "NetCashProvidedByUsedInInvestingActivities",
+            "NetCashProvidedByUsedInInvestingActivitiesContinuingOperations"),
+        "investingCashFlow", "cashFlow"
+    ),
+    PropertyDescriptor(
+        listOf(
+            "NetCashProvidedByUsedInOperatingActivities",
+            "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations"),
+        "operatingCashFlow", "cashFlow"
+    ),
+    PropertyDescriptor(
+        listOf(
+            "NetCashProvidedByUsedInFinancingActivitiesContinuingOperations",
+            "NetCashProvidedByUsedInFinancingActivities"),
+        "financingCashFlow", "cashFlow"
+    )
 
 //        "",
 //us-gaap:NetCashProvidedByUsedInFinancingActivities, (???)

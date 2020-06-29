@@ -11,6 +11,7 @@ import java.io.InputStream
 import java.lang.RuntimeException
 import java.time.Duration
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.format.DateTimeParseException
 import javax.xml.parsers.DocumentBuilderFactory
 import javax.xml.xpath.XPath
@@ -18,18 +19,30 @@ import javax.xml.xpath.XPathConstants
 import javax.xml.xpath.XPathFactory
 
 
-data class ResolvedPropertyData(
-    val propertyDescriptor: PropertyDescriptor,
-    val resolvedNodes: List<PropertyRawData>,
-    val alternatives: Set<String>)
+data class PropertyData(val descriptor: PropertyDescriptor, val extractedValues: List<ExtractedValue>)
 
-data class PropertyRawData(
-    val attrId: String,
+data class ExtractedValue (
+    val propertyId: String,
     val value: String,
+    val decimals: String,
+    // power of 10
+    val scale: String,
     val context: Context,
     val unit: ValueUnit?)
 
-open class Report(content: InputStream, private val isInline: Boolean, val metadata: ReportMetadata) {
+data class ValueUnit(
+    val id: String,
+    val measure: String?,
+    val divide: Pair<String, String>?)
+
+data class Period(val startDate: LocalDate, val endDate: LocalDate, val isInstant: Boolean = false) {
+    val duration: Long
+        get() = Duration.between(startDate.atStartOfDay(), endDate.atStartOfDay()).toDays()
+}
+
+data class Context(val id: String,  val period: Period?, val segment: String? = null)
+
+open class Report(content: InputStream, val date: LocalDateTime, private val reportType: String) {
 
     private val contextCache = hashMapOf<String, Context?>()
     private val unitCache = hashMapOf<String, ValueUnit?>()
@@ -43,13 +56,19 @@ open class Report(content: InputStream, private val isInline: Boolean, val metad
         builderFactory.isNamespaceAware = true
 
         val builder = builderFactory.newDocumentBuilder()
-        builder.parse(content)
+        try {
+            builder.parse(content)
+        } catch (e: Exception) {
+            throw RuntimeException(e)
+        }
     }
 
-    private fun actualiseMetrics(nodes: List<PropertyRawData>): List<PropertyRawData> {
+    private val isInline = reportDoc.documentElement.tagName == "html"
+
+    private fun actualiseMetrics(nodes: List<ExtractedValue>): List<ExtractedValue> {
         val closestToReportDate =  nodes.groupBy {
-                val endDate= it.context.period?.endDate?.atStartOfDay() ?: metadata.date;
-                Duration.between(endDate, metadata.date)
+                val endDate= it.context.period?.endDate?.atStartOfDay() ?: date;
+                Duration.between(endDate, date)
             }.minBy {
                 it.key
             }?.value ?: emptyList()
@@ -60,14 +79,30 @@ open class Report(content: InputStream, private val isInline: Boolean, val metad
 
         return closestToReportDate.groupBy {
             val duration = it.context.period?.duration ?: 0
-            if (metadata.reportType == "10-Q") 90 - duration else 360 - duration
+            if (reportType == "10-Q") 90 - duration else 365 - duration
         }.maxBy {
             it.key
         }?.value ?: emptyList()
     }
 
+    fun getPropertyName(node: Node): String {
+       return if (isInline) node.attr("name")!! else node.nodeName
+    }
 
-    fun resolveProperty(propertyDescriptor: PropertyDescriptor): ResolvedPropertyData {
+    fun extractAllPropertiesForContext(contextId: String): List<ExtractedValue> {
+        return resolveNodesReferencingContext(contextId).list().map {
+            ExtractedValue(
+                propertyId = it.nodeName.substringAfter("us-gaap:", getPropertyName(it)),
+                value = it.textContent,
+                decimals = it.attr("decimals") ?: "",
+                scale = it.attr("scale") ?: "",
+                context = contextById(contextId)!!,
+                unit = it.attr("unitRef")?.let {unitById(it)}
+            )
+        }
+    }
+
+    fun resolveProperty(propertyDescriptor: PropertyDescriptor): PropertyData {
         // Fetch all the variants
         val resolvedVariants = propertyDescriptor.variants
             .flatMap { variantId ->
@@ -84,18 +119,17 @@ open class Report(content: InputStream, private val isInline: Boolean, val metad
                         throw RuntimeException()
                     }
 
-                    PropertyRawData(variantId, it.textContent, ctx!!, unit)
+                    ExtractedValue(variantId, it.textContent, context = ctx, unit = unit,
+                        scale = it.attr("scale") ?: "", decimals = it.attr("decimals") ?: "")
                 }
             }
 
+        return PropertyData(propertyDescriptor, actualiseMetrics(resolvedVariants))
+    }
 
-        // if none found - resolve some hints
-        val alternatives = if (resolvedVariants.isEmpty()) {
-            val similarNodes = nodeSet("//*[contains(local-name(), '${propertyDescriptor.base}')]")
-            List(similarNodes.length) { similarNodes.item(it).nodeName!! }.toSet()
-        } else emptySet()
-
-        return ResolvedPropertyData(propertyDescriptor, actualiseMetrics(resolvedVariants), alternatives)
+    private fun resolveNodesReferencingContext(contextId: String): NodeList {
+        val selector = "//*[@contextRef='${contextId}']"
+        return xpath.compile(selector).evaluate(reportDoc, XPathConstants.NODESET) as NodeList
     }
 
     private fun resolveAttrNodes(attrId: String): NodeList {

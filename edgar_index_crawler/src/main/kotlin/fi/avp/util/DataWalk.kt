@@ -27,9 +27,6 @@ fun preparePerCompanyReportStorageStructure(reportIndexLocation: Path = Location
                         .map {
                             val cik = it.group(1).padStart(10, '0');
                             val companyName = sanitiseCompanyName(it.group(2))
-                            if (companyName.toLowerCase().contains("connectivity")) {
-                                println(companyName)
-                            }
 //                            val name = cikToCompanyName.put(cik, )
                             ReportMetadata(
                                 year = yearIndexDirectory.fileName.toString(),
