@@ -1,6 +1,5 @@
 package fi.avp.edgar
 
-import fi.avp.util.Locations
 import fi.avp.util.getReportData
 import java.util.*
 import java.util.zip.ZipEntry
@@ -22,5 +21,5 @@ private fun ZipInputStream.getEntries(): Map<String, String> {
 }
 
 fun getCompanyReports(ticker: String): Map<String, String> {
-    return getReportData(ticker).getEntries()
+    return getReportData(ticker)?.getEntries() ?: emptyMap()
 }

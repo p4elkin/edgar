@@ -1,7 +1,5 @@
 package fi.avp.edgar
 
-import fi.avp.edgar.data.CompanyRef
-import fi.avp.edgar.data.ReportMetadata
 import fi.avp.edgar.data.attrNames
 import org.junit.Test
 import java.io.File
@@ -21,10 +19,24 @@ class ReportTest {
         )
 
         val props = report.resolveProperty(attrNames.find { it.id == "revenue" }!!)
-        val resolveProperty = disambiguateProperties(
-            getNonAmbiguousContexts(listOf(props)),
-            listOf(props)
-        )
+//        val resolveProperty = disambiguateProperties(
+//            getNonAmbiguousContexts(listOf(props)),
+//            listOf(props)
+//        )
+    }
+
+    @Test
+    fun `000091591315000018`() {
+        val file = File("src/test/resources/000091591315000018.xml")
+        val parseProps = parseProps(file.inputStream(), LocalDate.of(2015, 5, 11).atStartOfDay(), "10-Q")
+        assertTrue { parseProps.data.isNotEmpty() }
+    }
+
+    @Test
+    fun abt20111231() {
+        val file = File("src/test/resources/abt-20111231.xml")
+        val parseProps = parseProps(file.inputStream(), LocalDate.of(2011, 12, 31).atStartOfDay(), "10-K")
+        assertTrue { parseProps.problems.suspiciousContexts.isEmpty() }
     }
 
     @Test

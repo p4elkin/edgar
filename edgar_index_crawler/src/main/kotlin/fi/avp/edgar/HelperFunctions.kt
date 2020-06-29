@@ -1,9 +1,10 @@
 package fi.avp.edgar
 
-import fi.avp.util.*
+import fi.avp.util.mapAsync
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import org.litote.kmongo.find
 import org.litote.kmongo.save
 
 fun ensureCikPaddingsInTickerMappings() {
@@ -27,14 +28,13 @@ fun ensureCikPaddingsInReport() {
     Database.reportIndex.insertMany(updated)
 }
 
-fun resolveFileNames() {
-    val reports = Database.reportIndex.find().toList()
+fun resolveFileNames(reports: List<ReportReference>) {
     reports.groupBy { it.ticker }.filter { it.key != null }.forEach { companyReports ->
         println("Downloading ${companyReports.key}")
         repeat(3) {
             try {
                 runBlocking {
-                    val downloadedStuff = companyReports.value.filter { it.reportFiles == null }
+                    val downloadedStuff = companyReports.value
                         .mapAsync {
                             it.copy(reportFiles = fetchRelevantFileNames(it))
                         }.awaitAll()
@@ -70,6 +70,11 @@ fun updateDataUrl() {
 }
 
 fun main() {
-    downloadXBRL()
+    fixReportRefsPointingToExtracts()
+}
+
+private fun fixReportRefsPointingToExtracts() {
+    val reports = Database.reportIndex.find("{'reportFiles.visualReport': {\$regex : '.*ex.*'}}").toList()
+    resolveFileNames(reports)
 }
 

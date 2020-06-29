@@ -5,18 +5,14 @@ import com.fasterxml.jackson.databind.DeserializationContext
 import com.fasterxml.jackson.databind.JsonDeserializer
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize
-import com.mongodb.DBObject
 import fi.avp.edgar.data.attrNames
 import fi.avp.util.mapAsync
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 import org.bson.Document
 import org.litote.kmongo.aggregate
-import org.litote.kmongo.findOne
-import java.lang.Exception
 import java.time.LocalDate
 
-val reportData = Database.reports
 val annualReportSeries = Database.database.getCollection("annual")
 val company = Database.database.getCollection("companies")
 val quarterlyReportSeries = Database.database.getCollection("quarterly")
@@ -78,26 +74,28 @@ data class ReportSeries(
 )
 
 fun getTicker(companyName: String): String? {
-    return try {
-        val ticker = company.findOne("{cik_str: ${getTrimmedCik(companyName)}}")?.let {
-            it["ticker"] as String
-        }
-        println("$companyName -> $ticker")
-        ticker
-    } catch (e: Exception) {
-        null
-    }
+    TODO("implement via database")
+//    return try {
+//        val ticker = company.findOne("{cik_str: ${getTrimmedCik(companyName)}}")?.let {
+//            it["ticker"] as String
+//        }
+//        println("$companyName -> $ticker")
+//        ticker
+//    } catch (e: Exception) {
+//        null
+//    }
 }
-
-fun getTrimmedCik(companyName: String): Int {
-    return reportData.aggregate<DBObject>(
-        "{\$match: {name: '$companyName'}}",
-        "{\$project: {'cik': {\$ltrim: {input: '\$cik', chars: '0'}}}}").first()!!["cik"].toString().toInt()
-}
+//
+//fun getTrimmedCik(companyName: String): Int {
+//    return reportData.aggregate<DBObject>(
+//        "{\$match: {name: '$companyName'}}",
+//        "{\$project: {'cik': {\$ltrim: {input: '\$cik', chars: '0'}}}}").first()!!["cik"].toString().toInt()
+//}
 
 private fun generateReport(companyName: String, prop: String, reportType: String, category: String): ReportSeries? {
     return try {
-        reportData.aggregate<ReportSeries>(
+        TODO("adapt to the change of the collection")
+        Database.reportIndex.aggregate<ReportSeries>(
             // filter to reports of specific company
             "{\$match: {name: '$companyName', type: '$reportType'}}",
             // include only some props

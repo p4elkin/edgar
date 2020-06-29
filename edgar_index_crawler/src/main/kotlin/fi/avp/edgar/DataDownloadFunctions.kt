@@ -31,6 +31,7 @@ suspend fun fetchRelevantFileNames(reportReference: ReportReference): ReportFile
 
     val reportNode = index["directory"]["item"]
         .filter { it.text("name").endsWith(".htm") }
+        .filter { (!it.text("name").contains("ex")) }
         .maxBy { it.long("size") }
 
     val calFile = index["directory"]["item"]
@@ -61,8 +62,13 @@ suspend fun fetchRelevantFileNames(reportReference: ReportReference): ReportFile
 }
 
 fun downloadXBRL() {
+//    val tickersToFilter = Database.reportIndexUnamended.find("{'reportFiles.visualReport': {\$regex : '.*ex.*'}}").map { it.ticker }.toSet()
     Database.reportIndex.find().toList().groupBy { it.ticker }
-        .filter { it.key != null && !Files.exists(Paths.get("${Locations.reports}/${it.key}.zip")) }
+        .filter {
+//            tickersToFilter.contains(it.key) &&
+            it.key != null &&
+            !Files.exists(Paths.get("${Locations.reports}/${it.key}.zip")) }
+
         .forEach { companyReports ->
             println("Downloading ${companyReports.key}")
             repeat(3) {
@@ -70,7 +76,7 @@ fun downloadXBRL() {
                     runBlocking {
                         val downloadedStuff = companyReports.value.filter { it.reportFiles != null }
                             .mapAsync { reportReference ->
-                                download(reportReference)
+                                downloadSingleReport(reportReference)
                             }.awaitAll()
                             .filterNotNull()
 
@@ -87,14 +93,42 @@ fun downloadXBRL() {
         }
 }
 
-suspend fun download(reportReference: ReportReference): XBRL? {
+fun downloadReports(ticker: String, refs: List<ReportReference>) {
+    println("Downloading ${ticker}")
+    repeat(3) {
+        try {
+            runBlocking {
+                val downloadedStuff = refs.filter { it.reportFiles != null }
+                    .mapAsync { reportReference ->
+                        downloadSingleReport(reportReference)
+                    }.awaitAll()
+                    .filterNotNull()
+
+                if (downloadedStuff.isNotEmpty()) {
+                    saveReports(ticker, downloadedStuff)
+                    delay(1000)
+                }
+            }
+            return
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+}
+
+suspend fun downloadSingleReport(reportReference: ReportReference): XBRL? {
     return reportReference.reportFiles?.xbrlReport?.let {
         XBRL(reportReference.dataUrl!!, asyncGetText("${reportReference.dataUrl}/$it"))
     }
 }
 
 fun saveReports(ticker: String, xbrls: List<XBRL>) {
-    ZipOutputStream(BufferedOutputStream(FileOutputStream("${Locations.reports}/${ticker}.zip"))).use { out ->
+    val path = "${Locations.reports}/${ticker}.zip"
+    if (Files.exists(Paths.get(path))) {
+        Files.delete(Paths.get(path))
+    }
+
+    ZipOutputStream(BufferedOutputStream(FileOutputStream(path))).use { out ->
         xbrls.forEach { entry ->
             entry.xbrl?.let {
                 BufferedInputStream(it.byteInputStream(StandardCharsets.UTF_8)).use { origin ->
@@ -106,4 +140,9 @@ fun saveReports(ticker: String, xbrls: List<XBRL>) {
             }
         }
     }
+}
+
+fun main() {
+//    downloadReports("ALB", Database.getReportReferences("ALB"))
+    downloadXBRL()
 }

@@ -51,6 +51,7 @@ val attrNames: List<PropertyDescriptor> = listOf(
     PropertyDescriptor(
         listOf(
     //        "ElectricalDistributionRevenue",
+            "ElectricUtilityRevenue",
             "SegmentReportingInformationRevenue",
             "RevenuesNetOfInterestExpense",
             "ElectricalTransmissionAndDistributionRevenue",

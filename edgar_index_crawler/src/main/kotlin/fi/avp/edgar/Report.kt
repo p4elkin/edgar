@@ -1,6 +1,6 @@
 package fi.avp.edgar
 
-import fi.avp.edgar.data.*
+import fi.avp.edgar.data.PropertyDescriptor
 import fi.avp.util.attr
 import fi.avp.util.find
 import fi.avp.util.list
@@ -8,7 +8,6 @@ import org.w3c.dom.Document
 import org.w3c.dom.Node
 import org.w3c.dom.NodeList
 import java.io.InputStream
-import java.lang.RuntimeException
 import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -19,7 +18,12 @@ import javax.xml.xpath.XPathConstants
 import javax.xml.xpath.XPathFactory
 
 
-data class PropertyData(val descriptor: PropertyDescriptor, val extractedValues: List<ExtractedValue>)
+data class PropertyData(
+    val descriptor: PropertyDescriptor,
+    val extractedValues: List<ExtractedValue>,
+    val contexts: List<Context>,
+    val valueUnits: List<ValueUnit>?
+)
 
 data class ExtractedValue (
     val propertyId: String,
@@ -27,8 +31,8 @@ data class ExtractedValue (
     val decimals: String,
     // power of 10
     val scale: String,
-    val context: Context,
-    val unit: ValueUnit?)
+    val context: String,
+    val unit: String?)
 
 data class ValueUnit(
     val id: String,
@@ -67,7 +71,7 @@ open class Report(content: InputStream, val date: LocalDateTime, private val rep
 
     private fun actualiseMetrics(nodes: List<ExtractedValue>): List<ExtractedValue> {
         val closestToReportDate =  nodes.groupBy {
-                val endDate= it.context.period?.endDate?.atStartOfDay() ?: date;
+                val endDate= contextById(it.context)?.period?.endDate?.atStartOfDay() ?: date;
                 Duration.between(endDate, date)
             }.minBy {
                 it.key
@@ -78,9 +82,9 @@ open class Report(content: InputStream, val date: LocalDateTime, private val rep
         }
 
         return closestToReportDate.groupBy {
-            val duration = it.context.period?.duration ?: 0
-            if (reportType == "10-Q") 90 - duration else 365 - duration
-        }.maxBy {
+            val duration = contextById(it.context)?.period?.duration ?: 0
+            if (reportType == "10-Q") kotlin.math.abs(90 - duration) else kotlin.math.abs(365 - duration)
+        }.minBy {
             it.key
         }?.value ?: emptyList()
     }
@@ -90,14 +94,14 @@ open class Report(content: InputStream, val date: LocalDateTime, private val rep
     }
 
     fun extractAllPropertiesForContext(contextId: String): List<ExtractedValue> {
-        return resolveNodesReferencingContext(contextId).list().map {
+        return resolveNodesReferencingContext(contextId).list().filter { it.nodeName.startsWith("us-gaap") }.map {
             ExtractedValue(
                 propertyId = it.nodeName.substringAfter("us-gaap:", getPropertyName(it)),
                 value = it.textContent,
                 decimals = it.attr("decimals") ?: "",
                 scale = it.attr("scale") ?: "",
-                context = contextById(contextId)!!,
-                unit = it.attr("unitRef")?.let {unitById(it)}
+                context = contextId,
+                unit = it.attr("unitRef")
             )
         }
     }
@@ -119,12 +123,15 @@ open class Report(content: InputStream, val date: LocalDateTime, private val rep
                         throw RuntimeException()
                     }
 
-                    ExtractedValue(variantId, it.textContent, context = ctx, unit = unit,
+                    ExtractedValue(variantId, it.textContent, context = ctx.id, unit = unit?.id,
                         scale = it.attr("scale") ?: "", decimals = it.attr("decimals") ?: "")
                 }
             }
 
-        return PropertyData(propertyDescriptor, actualiseMetrics(resolvedVariants))
+        val actualisedMetrics = actualiseMetrics(resolvedVariants)
+        return PropertyData(propertyDescriptor, actualisedMetrics,
+            actualisedMetrics.map { contextById(it.context)!! },
+            actualisedMetrics.map { it.unit }.filterNotNull().map { unitById(it)!! })
     }
 
     private fun resolveNodesReferencingContext(contextId: String): NodeList {
@@ -142,7 +149,7 @@ open class Report(content: InputStream, val date: LocalDateTime, private val rep
         return xpath.compile(selector).evaluate(reportDoc, XPathConstants.NODESET) as NodeList
     }
 
-    private fun unitById(id: String): ValueUnit? {
+    fun unitById(id: String): ValueUnit? {
         return unitCache.computeIfAbsent(id) {
             singleNode("//*[local-name()='unit' and @id='$id']")?.let {
                 ValueUnit(
@@ -156,7 +163,7 @@ open class Report(content: InputStream, val date: LocalDateTime, private val rep
         }
     }
 
-    private fun contextById(id: String): Context? {
+    fun contextById(id: String): Context? {
         return contextCache.computeIfAbsent(id) {
             singleNode("//*[local-name()='context' and @id='$id']")?.let {
                 val periodNode = it.find("period")

@@ -4,13 +4,13 @@ import com.mongodb.client.MongoCollection
 import fi.avp.edgar.data.CompanyRef
 import fi.avp.edgar.data.ReportMetadata
 import fi.avp.util.*
-import kotlinx.coroutines.*
-import org.bson.codecs.pojo.annotations.BsonId
-import org.bson.codecs.pojo.annotations.BsonProperty
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import java.io.InputStream
 import java.nio.file.Files
 import java.nio.file.Path
-import java.time.LocalDate
 import java.util.regex.Pattern
 
 val reportEntryPattern: Pattern = Pattern.compile("(\\d+)?\\|(.+)?\\|(10-K|10-Q)?\\|(.+)?\\|(.+\\.txt)")
@@ -39,8 +39,8 @@ private data class ReportData(
         metadata.date.toLocalDate(),
         metadata.getReportDataURL(),
         reportFile,
-        emptyList(),
-        extracts)
+        metrics = emptyList(),
+        extracts = extracts)
 }
 
 private typealias DownloadTask = suspend CoroutineScope.() -> ReportData
