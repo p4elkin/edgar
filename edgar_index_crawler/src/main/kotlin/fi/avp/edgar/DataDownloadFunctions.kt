@@ -13,7 +13,6 @@ import java.nio.file.Paths
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
-
 data class ReportFiles(
     val visualReport: String?,
     val xbrlReport: String?,
@@ -21,8 +20,7 @@ data class ReportFiles(
     val income: String?,
     val operations: String?,
     val balance: String?,
-    val financialSummary: String?
-)
+    val financialSummary: String?)
 
 private val xmlXBRLReportPattern = Regex("(.*)_cal.xml")
 suspend fun fetchRelevantFileNames(reportReference: ReportReference): ReportFiles {
@@ -62,10 +60,9 @@ suspend fun fetchRelevantFileNames(reportReference: ReportReference): ReportFile
 }
 
 fun downloadXBRL() {
-//    val tickersToFilter = Database.reportIndexUnamended.find("{'reportFiles.visualReport': {\$regex : '.*ex.*'}}").map { it.ticker }.toSet()
-    Database.reportIndex.find().toList().groupBy { it.ticker }
+    Database.reportIndex.find().toList()
+        .groupBy { it.ticker }
         .filter {
-//            tickersToFilter.contains(it.key) &&
             it.key != null &&
             !Files.exists(Paths.get("${Locations.reports}/${it.key}.zip")) }
 

@@ -29,7 +29,6 @@ data class ReportMetadata(val companyRef: CompanyRef,
 
 }
 
-
 data class PropertyDescriptor(
     val variants: List<String>,
     val id: String = "",
@@ -60,6 +59,7 @@ val attrNames: List<PropertyDescriptor> = listOf(
             "OilAndGasRevenue",
             "SalesRevenueGoodsNet",
             "SalesRevenueNet",
+            "SalesRevenueServicesNet",
             "TotalRevenuesAndOtherIncome",
             "RevenueFromContractWithCustomerIncludingAssessedTax",
             "RevenueFromContractWithCustomerExcludingAssessedTax"
@@ -76,7 +76,8 @@ val attrNames: List<PropertyDescriptor> = listOf(
         listOf(
     //        "IncreaseDecreaseInOtherOperatingCapitalNet",
             "OperatingIncomeLoss",
-            "GrossProfit"
+            "GrossProfit",
+            "UtilityRevenue"
     //        "ComprehensiveIncomeLoss",
     //        "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments",
     //        "IncomeLossFromContinuingOperationsIncludingPortionAttributableToNoncontrollingInterest",
@@ -101,9 +102,19 @@ val attrNames: List<PropertyDescriptor> = listOf(
         listOf(
             "NetCashProvidedByUsedInFinancingActivitiesContinuingOperations",
             "NetCashProvidedByUsedInFinancingActivities"),
-        "financingCashFlow", "cashFlow"
-    )
+        "financingCashFlow", "cashFlow"),
+    PropertyDescriptor(listOf(
+        "EarningsPerShareDiluted",
+        "EarningsPerShareBasicAndDiluted",
+        "IncomeLossFromContinuingOperationsPerDilutedShare",
+        "IncomeLossFromContinuingOperationsPerBasicShare",
+        "EarningsPerShareBasic",
+        "fast_BasicDilutedEarningsPerShareNetIncome"
+        //WeightedAverageNumberOfDilutedSharesOutstanding
+        //WeightedAverageNumberBasicDilutedSharesOutstanding
+// EarningsPerShareDiluted
+    ), id = "eps", category = "eps")
+)
 
 //        "",
 //us-gaap:NetCashProvidedByUsedInFinancingActivities, (???)
-)

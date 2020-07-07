@@ -5,6 +5,7 @@ import fi.avp.edgar.data.ReportMetadata
 import fi.avp.edgar.downloadReports
 import java.io.BufferedInputStream
 import java.io.FileInputStream
+import java.io.InputStream
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -22,11 +23,21 @@ object Locations {
 
 }
 
-fun getReportData(ticker: String): ZipInputStream? {
+fun getReportData(ticker: String): Map<String, InputStream>? {
+ val dataPath = Locations.reports.resolve(ticker)
+ if (!Files.exists(dataPath)) {
+  return null
+ }
+
+ return Locations.reports.resolve(ticker).toFile().listFiles()
+  .map { it.name to BufferedInputStream(it.inputStream()) }
+  .toMap()
+}
+
+fun getReportDataZip(ticker: String): ZipInputStream? {
  val zipLocation = Locations.reports.resolve("${ticker}.zip")
  if (!Files.exists(zipLocation)) {
-  println("----> data for $ticker is missing")
-  downloadReports(ticker, Database.getReportReferences(ticker))
+     return null
  }
  return ZipInputStream(BufferedInputStream(FileInputStream(zipLocation.toFile())))
 }

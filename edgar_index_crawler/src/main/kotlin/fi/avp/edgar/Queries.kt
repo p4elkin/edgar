@@ -3,6 +3,9 @@ package fi.avp.edgar
 import com.mongodb.client.MongoCollection
 import org.litote.kmongo.aggregate
 
+data class AggregatedReport(val _id: String, val series: List<ReportSeries>)
+data class CompanyReports(val ticker: String?, val reports: List<AggregatedReport>)
+
 fun MongoCollection<ReportRecord>.getReportsOfType(ticker: String = "", reportType: String): List<CompanyReports> {
     return aggregate<CompanyReports>(
         matchTicker(ticker),

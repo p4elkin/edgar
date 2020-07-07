@@ -13,19 +13,17 @@ import org.bson.Document
 import org.litote.kmongo.aggregate
 import java.time.LocalDate
 
-val annualReportSeries = Database.database.getCollection("annual")
 val company = Database.database.getCollection("companies")
-val quarterlyReportSeries = Database.database.getCollection("quarterly")
 
 fun main() {
-    quarterlyReportSeries.drop()
-    annualReportSeries.drop()
-    runBlocking {
-        getCompanyNames().map { it.replace("/", "//") }.forEach {
-            quarterlyReportSeries.insertOne(computeReports(it, false))
-            annualReportSeries.insertOne(computeReports(it, true))
-        }
-    }
+//    quarterlyReportSeries.drop()
+//    annualReportSeries.drop()
+//    runBlocking {
+//        getCompanyNames().map { it.replace("/", "//") }.forEach {
+//            quarterlyReportSeries.insertOne(computeReports(it, false))
+//            annualReportSeries.insertOne(computeReports(it, true))
+//        }
+//    }
 }
 
 private suspend fun computeReports(companyName: String, isAnnual: Boolean): Document {
@@ -94,7 +92,7 @@ fun getTicker(companyName: String): String? {
 
 private fun generateReport(companyName: String, prop: String, reportType: String, category: String): ReportSeries? {
     return try {
-        TODO("adapt to the change of the collection")
+        // TODO("adapt to the change of the collection")
         Database.reportIndex.aggregate<ReportSeries>(
             // filter to reports of specific company
             "{\$match: {name: '$companyName', type: '$reportType'}}",
