@@ -1,5 +1,14 @@
 package fi.avp.edgar
 
+import fi.avp.util.mapAsync
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import org.litote.kmongo.find
+import org.litote.kmongo.getCollection
+import org.litote.kmongo.updateOne
+import java.util.concurrent.Executors
+
 data class Metric(
     val value: Double?,
     val unit: String?,
@@ -149,3 +158,25 @@ object Revenue:MetricExtractor(
         "Revenues",
         "SalesRevenueNet")
 )
+
+fun extractMetrics(update: (ReportReference) -> ReportReference) {
+    val reports = Database.database.getCollection<ReportReference>("sp500")
+    val allReports = reports
+        .find("{formType: '10-K'}")
+        .batchSize(10000).toList()
+
+    println("analyzing ${allReports.size} reports")
+    runBlocking {
+        withContext(Executors.newFixedThreadPool(16).asCoroutineDispatcher()) {
+            allReports.chunked(100).mapAsync {
+                it.forEach {
+                    reports.updateOne(update(it))
+                }
+            }
+        }
+        println("done")
+    }
+}
+
+fun main() {
+}

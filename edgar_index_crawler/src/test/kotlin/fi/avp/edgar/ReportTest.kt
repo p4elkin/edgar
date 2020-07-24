@@ -124,7 +124,7 @@ class ReportTest {
     fun mapCompanyReportRecordsToData() {
         val dataStream = getCompanyReports("AAPL")
         val appleRefs =
-            Database.getReportReferences("AAPL").map {
+            Database.getReportReferencesByTicker("AAPL").map {
                 it to dataStream.get("${it.reference}.xml")
             }.toMap()
         assertTrue { appleRefs.isNotEmpty() }
@@ -145,12 +145,8 @@ class ReportTest {
     }
 
     private fun parse(str: String, decimals: Int, scale: Double): Double {
-        val commaSeparatedStr = str.replace(".", ",")
-        val beforeComma = commaSeparatedStr.substringBeforeLast(",").replace(",", "")
-        val afterComma = commaSeparatedStr.substringAfterLast(",", "")
-
-        val padLength: Double = if (afterComma.isEmpty()) decimals.toDouble() else -afterComma.length * 1.0
-        return (beforeComma + afterComma).toDouble() * pow(10.0, padLength) * pow(10.0, scale)
+        val withoutSeparator: Double = str.replace(",", "").replace(".", "").toDouble()
+        return withoutSeparator * pow(10.0, -decimals.toDouble())
     }
 
     @Test

@@ -50,14 +50,12 @@ data class ExtractedValue (
     val unit: String?) {
 
     fun numericValue(): Double {
-        val decimals = decimals.toIntOrNull() ?: 0
-        val scale = scale.toIntOrNull() ?: 0
-        val commaSeparatedStr = value.replace(".", ",")
-        val beforeComma = commaSeparatedStr.substringBeforeLast(",").replace(",", "")
-        val afterComma = commaSeparatedStr.substringAfterLast(",", "")
-
-        val padLength: Double = if (afterComma.isEmpty()) decimals.toDouble() else -afterComma.length * 1.0
-        return (beforeComma + afterComma).toDouble() * Math.pow(10.0, padLength) * Math.pow(10.0, scale * 1.0)
+        return try {
+            val withoutSeparator: Double = value.replace(",", "").replace(".", "").toDouble()
+            withoutSeparator * Math.pow(10.0, -decimals.toDouble())
+        } catch(e: Exception) {
+            Double.NaN
+        }
     }
 }
 
@@ -138,7 +136,7 @@ open class Report(content: InputStream, val date: LocalDateTime, private val rep
         }
     }
 
-    fun resolveDei(): List<PropertyData> {
+    private fun resolveDei(): List<PropertyData> {
         val deiNodes = xpath.compile("//*[starts-with(name(), 'dei:')]")
             .evaluate(this.reportDoc, XPathConstants.NODESET) as NodeList
 
@@ -201,7 +199,7 @@ open class Report(content: InputStream, val date: LocalDateTime, private val rep
         return xpath.compile(selector).evaluate(reportDoc, XPathConstants.NODESET) as NodeList
     }
 
-    fun unitById(id: String): ValueUnit? {
+    private fun unitById(id: String): ValueUnit? {
         return unitCache.computeIfAbsent(id) {
             singleNode("//*[local-name()='unit' and @id='$id']")?.let {
                 ValueUnit(
@@ -215,7 +213,7 @@ open class Report(content: InputStream, val date: LocalDateTime, private val rep
         }
     }
 
-    fun contextById(id: String): Context? {
+    private fun contextById(id: String): Context? {
         return contextCache.computeIfAbsent(id) {
             singleNode("//*[local-name()='context' and @id='$id']")?.let {
                 val periodNode = it.find("period")

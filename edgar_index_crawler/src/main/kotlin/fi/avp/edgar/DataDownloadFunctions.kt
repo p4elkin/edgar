@@ -9,6 +9,7 @@ import java.io.BufferedOutputStream
 import java.io.FileOutputStream
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
+import java.nio.file.Path
 import java.nio.file.Paths
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
@@ -60,66 +61,87 @@ suspend fun fetchRelevantFileNames(reportReference: ReportReference): ReportFile
 }
 
 fun downloadXBRL() {
-    Database.reportIndex.find().toList()
-        .groupBy { it.ticker }
-        .filter {
-            it.key != null &&
-            !Files.exists(Paths.get("${Locations.reports}/${it.key}.zip")) }
-
-        .forEach { companyReports ->
-            println("Downloading ${companyReports.key}")
-            repeat(3) {
-                try {
-                    runBlocking {
-                        val downloadedStuff = companyReports.value.filter { it.reportFiles != null }
-                            .mapAsync { reportReference ->
-                                downloadSingleReport(reportReference)
-                            }.awaitAll()
-                            .filterNotNull()
-
-                        if (downloadedStuff.isNotEmpty()) {
-                            saveReports(companyReports.key!!, downloadedStuff)
-                            delay(1000)
-                        }
-                    }
-                    return@forEach
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            }
+    Database.getSP500Companies().forEach {
+        if (!Files.exists(Paths.get("${Locations.reports}/${it.primaryTicker}.zip"))) {
+            val primaryTicker = it.primaryTicker
+            println("Downloading $primaryTicker")
+            downloadReports(primaryTicker, it.tickers.flatMap { Database.getReportReferencesByTicker(it) })
         }
+    }
 }
 
 fun downloadReports(ticker: String, refs: List<ReportReference>) {
     println("Downloading ${ticker}")
-    repeat(3) {
-        try {
             runBlocking {
-                val downloadedStuff = refs.filter { it.reportFiles != null }
-                    .mapAsync { reportReference ->
-                        downloadSingleReport(reportReference)
-                    }.awaitAll()
-                    .filterNotNull()
+                val downloadedStuff = refs
+                    .sortedByDescending { it.dateFiled }
+                    .filter { it.reportFiles != null }
+                    .distinctBy { it.reportFiles!!.xbrlReport }
+                    .mapAsync { downloadSingleReport(it) }
+                    .awaitAll()
 
                 if (downloadedStuff.isNotEmpty()) {
-                    saveReports(ticker, downloadedStuff)
+                    saveZippedReports(ticker, downloadedStuff.filterNotNull())
                     delay(1000)
                 }
             }
-            return
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
 }
 
 suspend fun downloadSingleReport(reportReference: ReportReference): XBRL? {
-    return reportReference.reportFiles?.xbrlReport?.let {
-        XBRL(reportReference.dataUrl!!, asyncGetText("${reportReference.dataUrl}/$it"))
+    var result: XBRL? = null
+    for (trialIndex in 0..2) {
+        try {
+            val (xbrl, income, cashflow, balance) = listOf(
+                reportReference.reportFiles?.xbrlReport,
+                reportReference.reportFiles?.income,
+                reportReference.reportFiles?.cashFlow,
+                reportReference.reportFiles?.balance)
+                .mapAsync {
+                    it?.let {
+                        asyncGetText("${reportReference.dataUrl}/$it")
+                    }
+                }.awaitAll()
+
+            result = XBRL(reportReference.reportFiles!!.xbrlReport!!, xbrl, cashflow, balance, income)
+        } catch (e: Exception) {
+            e.printStackTrace()
+
+        }
+    }
+
+    return result
+}
+
+fun saveReportWithoutZipping(ticker: String, data: XBRL) {
+    val path = Paths.get("${Locations.reportsExtracted}/${ticker}.zip")
+    if (!Files.exists(path)) {
+        Files.createDirectory(path)
+    }
+
+    val createFile: (String, String) -> Unit = { fileName, text ->
+        Files.createFile(path.resolve(fileName))
+            .toFile()
+            .writeText(text, StandardCharsets.UTF_8)
+    }
+
+    data.xbrl?.let {
+        createFile(data.reportFileName, it)
+    }
+
+    data.cashFlow?.let {
+        createFile("cashflow-" + data.reportFileName, it)
+    }
+
+    data.balanceSheet?.let {
+        createFile("balance-" + data.reportFileName, it)
+    }
+
+    data.incomeStatement?.let {
+        createFile("income-" + data.reportFileName, it)
     }
 }
 
-fun saveReports(ticker: String, xbrls: List<XBRL>) {
+fun saveZippedReports(ticker: String, xbrls: List<XBRL>) {
     val path = "${Locations.reports}/${ticker}.zip"
     if (Files.exists(Paths.get(path))) {
         Files.delete(Paths.get(path))
@@ -127,19 +149,24 @@ fun saveReports(ticker: String, xbrls: List<XBRL>) {
 
     ZipOutputStream(BufferedOutputStream(FileOutputStream(path))).use { out ->
         xbrls.forEach { entry ->
-            entry.xbrl?.let {
-                BufferedInputStream(it.byteInputStream(StandardCharsets.UTF_8)).use { origin ->
-                    val zipEntry = ZipEntry("${entry.dataUrl.substringAfterLast("/")}.xml")
-                    out.putNextEntry(zipEntry)
-                    origin.copyTo(out, 1024)
-                }
+            createZipEntry(entry.reportFileName, "", entry.xbrl, out)
+            createZipEntry(entry.reportFileName, "cashflow-", entry.cashFlow, out)
+            createZipEntry(entry.reportFileName, "balance-", entry.balanceSheet, out)
+            createZipEntry(entry.reportFileName, "income-", entry.incomeStatement, out)
+        }
+    }
+}
 
-            }
+fun createZipEntry(reportFileName: String, prefix: String, data: String?, out: ZipOutputStream) {
+    data?.let {
+        BufferedInputStream(it.byteInputStream(StandardCharsets.UTF_8)).use { origin ->
+            val zipEntry = ZipEntry("${prefix}$reportFileName")
+            out.putNextEntry(zipEntry)
+            origin.copyTo(out, 1024)
         }
     }
 }
 
 fun main() {
-//    downloadReports("ALB", Database.getReportReferences("ALB"))
     downloadXBRL()
 }

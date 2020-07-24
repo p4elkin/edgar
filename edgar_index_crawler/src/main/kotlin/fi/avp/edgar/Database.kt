@@ -2,18 +2,29 @@ package fi.avp.edgar
 
 import org.litote.kmongo.KMongo
 import org.litote.kmongo.find
+import org.litote.kmongo.getCollection
 import org.litote.kmongo.save
 import java.time.LocalDate
-import javax.print.attribute.standard.JobKOctetsProcessed
+import java.time.format.DateTimeFormatter
 
 object Database {
-    val client = KMongo.createClient() //get com.mongodb.MongoClient new instance
+
+    private val client = KMongo.createClient() //get com.mongodb.MongoClient new instance
+
     val database = client.getDatabase("sec-report") //normal java driver usage
     val reports = database.getCollection("reports", ReportRecord::class.java)
     val reportIndex = database.getCollection("report-index", ReportReference::class.java)
     val xbrl = database.getCollection("xbrl", XBRL::class.java)
-    val tickers = database.getCollection("ticker", TickerMapping::class.java)
     val sp500 = database.getCollection("s-and-p-500")
+
+    val companyList = database.getCollection<CompanyInfo>("company-list")
+        .find()
+        .batchSize(2000)
+        .toList()
+
+    fun getSP500Companies(): List<CompanyInfo> {
+        return companyList.filter { it.isInSP500 }
+    }
 
     fun getSP500Tickers(): List<String> {
         return sp500.distinct("ticker", String::class.java).toList()
@@ -23,65 +34,75 @@ object Database {
         return reportIndex.distinct("ticker", String::class.java).toList()
     }
 
-    fun getReportReferences(ticker: String): List<ReportReference> {
-        return reportIndex.find("{ticker: '$ticker'}").toList()
+    fun getReportReferencesByCik(cik: String): List<ReportReference> {
+        return reportIndex.find("{cik: '$cik'}").toList()
     }
 
-    fun storeExtractedData(ref: ReportReference, data: ReportDataExtractionResult) {
-        val relatedContexts = data.data.flatMap { it.contexts }.toSet()
-        val relatedUnits = data.data.flatMap { it.valueUnits ?: emptySet() }.toSet()
-
-        reportIndex.save(ref.copy(
-            processed = true,
-            contexts = relatedContexts,
-            units = relatedUnits,
-            problems = if (data.problems.missingProperties.isEmpty() && data.problems.suspiciousContexts.isEmpty()) null else data.problems,
-            extractedData = data.data.flatMap { it.extractedValues
-                .filter { it.unit != null || it.propertyId.startsWith("dei:") }
-                .filter { it.value.length <= 100 }
-            }))
+    fun getReportReferencesByTicker(ticker: String): List<ReportReference> {
+        return reportIndex.find("{ticker: '$ticker'}").toList()
     }
 }
 
-data class TickerMapping(val _id: String, val ticker: String, val cik: String)
-data class XBRL(val dataUrl: String, val xbrl: String?)
+data class XBRL(val reportFileName: String, val xbrl: String?, val cashFlow: String?, val balanceSheet: String?, val incomeStatement: String?)
+
+
+val filingReferencePattern = Regex("^(.*?)\\s+(10-k|10-Q)\\s+(\\d+)\\s+(\\d+)\\s+(.+.htm)")
+fun resolveFilingInfoFromIndexRecord(indexRecord: String): ReportReference? {
+    return filingReferencePattern.find(indexRecord)?.let {
+        val groups = it.groups
+        val dataUrl = groups[5]?.value?.replace("-", "")?.replace("index.htm", "")
+        ReportReference(
+            ticker = Database.companyList.find { it.cik.contains(groups[3]!!.value.toInt()) }?.primaryTicker ?: "",
+            companyName = groups[1]!!.value,
+            formType = groups[2]!!.value,
+            fileName = groups[5]!!.value,
+            dataUrl = dataUrl,
+            cik = groups[3]?.value,
+            dateFiled = groups[4]?.value?.let {
+                LocalDate.parse(
+                    it,
+                    DateTimeFormatter.ofPattern("yyyyMMdd")
+                )
+            }
+        )
+    }
+}
 
 data class ReportReference(
-    val _id: String,
+    var _id: String? = null,
     val cik: String?,
-    val revenue: Metric?,
-    val netIncome: Metric?,
-    val investingCashFlow: Metric?,
-    val operatingCashFlow: Metric?,
-    val financingCashFlow: Metric?,
-    val fiscalYear: Long?,
-    val eps: Metric?,
-    val liabilities: Metric?,
-    val sharesOutstanding: Metric?,
-    val assets: Metric?,
     val dateFiled: LocalDate?,
-    val fileName: String?,
+    val fileName: String? = null,
     val companyName: String?,
     val formType: String?,
-    val reportFile: String?,
-    val ticker: String?,
+    val revenue: Metric? = null,
+    val netIncome: Metric? = null,
+    val investingCashFlow: Metric? = null,
+    val operatingCashFlow: Metric? = null,
+    val financingCashFlow: Metric? = null,
+    val fiscalYear: Long? = null,
+    val eps: Metric? = null,
+    val liabilities: Metric? = null,
+    val sharesOutstanding: Metric? = null,
+    val assets: Metric? = null,
+    val ticker: String? = null,
     var dataUrl: String?,
     val processed: Boolean = false,
-    val problems: ReportProblems?,
-    val contexts: Set<Context>?,
-    val units: Set<ValueUnit>?,
-    val extractedData: List<ExtractedValue>?,
-    var reference: String?, // last segment of data URL
-    val reportFiles: ReportFiles?) {
+    val problems: ReportProblems? = null,
+    val contexts: Set<Context>? = emptySet(),
+    val units: Set<ValueUnit>? = emptySet(),
+    val extractedData: List<ExtractedValue>? = emptyList(),
+    var reference: String? = null, // last segment of data URL
+    val reportFiles: ReportFiles? = null) {
 
     init {
-        val reportId = fileName.let {
-            val id = it?.substringAfterLast("/")
-            id?.substring(0, id.length - 4)
+        fileName?.let {
+            if (dataUrl == null) {
+                dataUrl = "$EDGAR_DATA${cik}/${it.replace("-", "")}"
+            }
+            reference = dataUrl?.substringAfterLast("/")
+            _id = reference
         }
-
-        dataUrl = "$EDGAR_DATA${cik}/${reportId?.replace("-", "")}"
-        reference = dataUrl?.substringAfterLast("/")
     }
 }
 

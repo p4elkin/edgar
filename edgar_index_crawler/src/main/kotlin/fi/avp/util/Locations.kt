@@ -19,17 +19,20 @@ object Locations {
 
  val reports: Path = parentDir.resolve("data/reports")
 
+ val reportsExtracted: Path = parentDir.resolve("data/reports/extracted")
+
  val indicesDir: Path = parentDir.resolve("data/report_indices")
 
 }
 
 fun getReportData(ticker: String): Map<String, InputStream>? {
- val dataPath = Locations.reports.resolve(ticker)
+ val dirName = "${ticker}.zip"
+ val dataPath = Locations.reportsExtracted.resolve(dirName)
  if (!Files.exists(dataPath)) {
   return null
  }
 
- return Locations.reports.resolve(ticker).toFile().listFiles()
+ return Locations.reportsExtracted.resolve(dirName).toFile().listFiles()
   .map { it.name to BufferedInputStream(it.inputStream()) }
   .toMap()
 }

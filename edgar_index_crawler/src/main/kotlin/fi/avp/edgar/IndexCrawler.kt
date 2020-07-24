@@ -10,12 +10,62 @@ import kotlinx.coroutines.runBlocking
 import okhttp3.Request
 import java.nio.file.Files
 import java.nio.file.Paths
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 const val EDGAR_DATA = "https://www.sec.gov/Archives/edgar/data/"
 const val EDGAR_INDEX_URL = "https://www.sec.gov/Archives/edgar/full-index/"
 const val REPORT_INDEX_FILE_NAME = "report_index.csv"
+const val DAILY_INDEX = "https://www.sec.gov/Archives/edgar/daily-index/"
 
-data class QuarterIndex(val year: String, val quarterId: String, val xbrlData: String)
+data class QuarterIndex(
+    val year: String,
+    val quarterId: String,
+    val xbrlData: String)
+
+data class ArchiveEntry(
+    val url: String,
+    val sizeKb: Int,
+    val name: String,
+    val lastModified: LocalDateTime
+)
+
+suspend fun getFilingsAfter(date: LocalDate): List<ArchiveEntry> {
+    val yearUrl = crawl(DAILY_INDEX).maxBy { it.lastModified }?.url
+    return yearUrl?.let {
+        val quarterUrl = crawl(it).maxBy { it.lastModified }?.url
+        quarterUrl?.let {
+            crawl(it)
+                .filter { it.name.startsWith("crawler") }
+                .filter { it.lastModified.isAfter(date.atStartOfDay()) }
+        }
+    } ?: emptyList()
+}
+
+suspend fun crawl(url: String): List<ArchiveEntry> {
+    val data = asyncJson(
+        Request.Builder()
+            .url("$url/index.json")
+            .build())
+
+    return data["directory"]["item"].map {
+        val href = it.text("href")
+        val sizeKb = it.text("size")
+            .replace(" KB", "")
+            .toInt()
+        val lastModified = LocalDateTime.parse(
+            it.text("last-modified"),
+            DateTimeFormatter.ofPattern("MM/dd/yyyy hh:mm:ss a"))
+
+        ArchiveEntry(
+            url = "$url${href}",
+            sizeKb = sizeKb,
+            lastModified = lastModified,
+            name = it.text("name")
+        )
+    }
+}
 
 fun main() {
     val index = runBlocking {
@@ -33,7 +83,10 @@ fun main() {
                 quarterlyIndex
                     .mapAsync {
                         val quarterId = it.text("href").trim('/')
-                        QuarterIndex(year = year, quarterId = quarterId, xbrlData = asyncGetText("${yearDataIndexUrl}/${quarterId}/xbrl.idx"))
+                        QuarterIndex(
+                            year = year,
+                            quarterId = quarterId,
+                            xbrlData = asyncGetText("${yearDataIndexUrl}/${quarterId}/xbrl.idx"))
                     }
                     .awaitAll()
             }

@@ -2,119 +2,131 @@ package fi.avp.edgar
 
 import fi.avp.util.mapAsync
 import kotlinx.coroutines.*
-import org.litote.kmongo.find
-import org.litote.kmongo.getCollection
-import org.litote.kmongo.save
-import org.litote.kmongo.updateOne
-import sun.nio.ch.Net
-import java.lang.Math.min
+import org.litote.kmongo.*
 import java.lang.StringBuilder
 import java.nio.file.Paths
 import java.util.concurrent.Executors
-import kotlin.reflect.full.memberProperties
 
-fun ensureCikPaddingsInTickerMappings() {
-    val updated = Database.tickers.find().map {
-        it.copy(cik = it.cik.padStart(10, '0'), ticker = it.ticker.toUpperCase())
-    }.distinctBy { it.cik }
+data class CompanyInfo(
+    val _id: String? = null,
+    val primaryTicker: String,
+    val tickers: Set<String> = emptySet(),
+    val isInSP500: Boolean = false,
+    val cik: Set<Int>,
+    val names: Set<String>,
+    val description: String = "",
+    val exchange: String = "",
+    val sic: Int = -1)
 
-    Database.tickers.drop()
-    Database.tickers.insertMany(updated)
-}
+data class SecCompanyRecord(
+    val cik_str: Int,
+    val title: String,
+    val ticker: String)
 
-fun ensureCikPaddingsInReport() {
-    val tickers = Database.tickers.find().toList()
-    val reportRefs = Database.reportIndex.find().toList()
-    val updated = reportRefs.map {
-        it.copy(ticker = tickers
-            .find { tickerMapping -> it.cik?.padStart(10, '0') == tickerMapping.cik}?.ticker)
-    }
+/**
+ * Take the data from sec (json file extract) and company info from internet.
+ * Sec data is considered as primary (has more actual ticker and sic numbers).
+ * The algorithms collects all the records that have the same sic number or the same
+ * ticker and aggregates them into a single record.
+ */
+fun consolidateCompanyInfo() {
+    val secTickerDatabase = Database.database.getCollection<SecCompanyRecord>("sec-ticker-database")
+        .find()
+        .toList()
 
-    Database.reportIndex.drop()
-    Database.reportIndex.insertMany(updated)
-}
+    val groupedSecRecords = HashMap<SecCompanyRecord, MutableSet<SecCompanyRecord>>()
+    secTickerDatabase.map {secRecord ->
+        val existingRecord = groupedSecRecords
+            .entries
+            .find { it.key.ticker == secRecord.ticker || it.key.cik_str == secRecord.cik_str || it.key.title == secRecord.title }
 
-fun resolveFileNames(reports: List<ReportReference>) {
-    reports.groupBy { it.ticker }.filter { it.key != null }.forEach { companyReports ->
-        println("Downloading ${companyReports.key}")
-        repeat(3) {
-            try {
-                runBlocking {
-                    val downloadedStuff = companyReports.value
-                        .mapAsync {
-                            it.copy(reportFiles = fetchRelevantFileNames(it))
-                        }.awaitAll()
-
-                    downloadedStuff.forEach { Database.reportIndex.save(it) }
-                    if (downloadedStuff.isNotEmpty()) {
-                        delay(1000)
-                    }
-                }
-                return@forEach
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
+        if (existingRecord == null) {
+            groupedSecRecords[secRecord] = hashSetOf(secRecord)
+        } else {
+            existingRecord.value.add(secRecord)
         }
     }
+
+    val companyInfoFromSec = groupedSecRecords.mapValues {
+        val tickers = it.value.map { it.ticker }.toSet()
+        val cik = it.value.map { it.cik_str }.toSet()
+        val titles = it.value.map { it.title }.toSet()
+
+        CompanyInfo(
+            primaryTicker = tickers.minBy { it.length }!!,
+            tickers = tickers,
+            cik = cik,
+            names = titles
+        )
+
+    }.values.toMutableList()
+
+    val companyInfoDatabase = Database.database.getCollection("company-info").find().toList()
+
+    val withAdditionalInformation = companyInfoDatabase.map { info ->
+        val ticker = info.get("ticker").toString()
+        val cik = info.getInteger("cik") ?: -1
+        val infoFromSec = companyInfoFromSec.find { it.cik.contains(cik) || it.tickers.contains(ticker) }
+        val sic = info["SIC"].let {
+            when (it) {
+                is Int -> it
+                is Double -> it.toInt()
+                "" -> -1
+                is String -> it.toInt()
+                else -> -1
+            }
+        }
+        val exchange = info.getString("Exchange")
+        val name = info["Name"].toString()
+
+        infoFromSec?.let {
+            it.copy(
+                exchange = exchange,
+                tickers = it.tickers.plus(ticker),
+                cik = it.cik.plus(cik),
+                names = it.names.plus(name),
+                sic = sic)
+        } ?: CompanyInfo(
+            primaryTicker = ticker,
+            exchange = exchange,
+            cik = setOf(cik),
+            names = setOf(name),
+            tickers = setOf(ticker),
+            sic = sic
+        )
+    }
+
+    val companyList = Database.database.getCollection<CompanyInfo>("company-list")
+    companyList.drop()
+
+    companyInfoFromSec
+        .filter { infoFromSec -> withAdditionalInformation.none { it.primaryTicker == infoFromSec.primaryTicker } }
+        .plus(withAdditionalInformation)
+        .forEach {
+            companyList.insertOne(it)
+        }
+
+    val sP500Tickers = Database.getSP500Tickers()
+    companyList.find().toList().forEach {
+        var tickers = it.tickers
+            .flatMap { setOf(it, it.replace('-', '.'), it.replace('.', '-')) }.toSet()
+
+        if (it.tickers.contains("GOOG")) {
+           tickers = tickers.plus("GOOGL")
+        }
+
+        if (it.tickers.any { sP500Tickers.contains(it) }) {
+            companyList.replaceOne(it.copy(isInSP500 = true))
+        }
+        companyList.replaceOne(it.copy(tickers = tickers))
+    }
 }
-
-val revenueProps = listOf(
-    "Revenues",
-    "SalesRevenueNet",
-    "TotalRevenuesAndOtherIncome",
-    "SalesRevenueGoodsNet",
-    "SalesRevenueServicesNet",
-    "OilAndGasRevenue",
-    "FoodAndBeverageRevenue",
-    "SalesRevenueServicesGross",
-    "ElectricUtilityRevenue",
-    "SegmentReportingInformationRevenue",
-    "RevenuesNetOfInterestExpense",
-    "ElectricalTransmissionAndDistributionRevenue",
-    "RealEstateRevenueNet",
-    "HealthCareOrganizationRevenue",
-//    "BrokerageCommissionsRevenue",
-    "RefiningAndMarketingRevenue",
-    "RevenueMineralSales",
-    "AdministrativeServicesRevenue",
-    "HomeBuildingRevenue",
-    "RevenuesExcludingInterestAndDividends",
-    "RevenueFromContractWithCustomerIncludingAssessedTax",
-    "RevenueFromContractWithCustomerExcludingAssessedTax",
-    "RevenuesExcludingCorporate"//https://www.sec.gov/Archives/edgar/data/1015780/000119312513204379/0001193125-13-204379-index.html
-)
-
-val income = listOf(
-    "OperatingIncomeLoss",
-    "GrossProfit"
-)
-
-val eps = listOf(
-    "EarningsPerShareDiluted",
-    "EarningsPerShareBasicAndDiluted",
-    "EarningsPerShareBasic",
-    "IncomeLossFromContinuingOperationsPerDilutedShare",
-    "IncomeLossFromContinuingOperationsPerBasicShare",
-    "fast_BasicDilutedEarningsPerShareNetIncome"
-    //WeightedAverageNumberOfDilutedSharesOutstanding
-    //WeightedAverageNumberBasicDilutedSharesOutstanding
-// EarningsPerShareDiluted
-)
-
 
 fun moveSP500Reports() {
     val tickers = Database.getSP500Tickers()
     val sp500 = Database.database.getCollection("sp500", ReportReference::class.java)
     Database.reportIndex.find().toList().filter { it.ticker in tickers }.forEach {
         sp500.save(it)
-    }
-}
-
-fun findReportsLackingContext() {
-    Database.database.getCollection("sp500", ReportReference::class.java).find().forEach {
-        if (it.contexts == null || it.contexts.size < 2) {
-            println(it.dataUrl)
-        }
     }
 }
 
@@ -133,38 +145,16 @@ fun findReportsWithMultipleEPS() {
     }
 }
 
-fun locateTickerMismatch() {
-    val reports = Database.database.getCollection<ReportReference>("sp500")
-}
-
-fun printSP500Tickers() {
-    Database.getSP500Tickers().forEach {
-        println(it)
+fun fixMissingTickers() {
+    val companyList = Database.companyList
+    Database.reports.find("{ticker: null}").forEach {
     }
 }
 
 fun main() {
 
-//    printSP500Tickers()
     dump10KReportsToCSV()
-
-//    moveSP500Reports()
-//    fixReportRefsPointingToExtracts()
-//    findReportsWithMultipleEPS()
-//    generateReport()
-//    findReportsLackingContext()
-//    calculateAssets {it.copy(
-//        assets = Assets.get(it),
-//        revenue = Revenue.get(it),
-//        eps = Eps.get(it),
-//        liabilities = Liabilities.get(it),
-//        operatingCashFlow = OperatingCashFlow.get(it),
-//        financingCashFlow = FinancingCashFlow.get(it),
-//        investingCashFlow = InvestingCashFlow.get(it),
-//        netIncome = NetIncome.get(it),
-//        fiscalYear = FiscalYearExtractor.get(it)?.toLong())}
-
-
+//    consolidateCompanyInfo()
 }
 
 private fun dump10KReportsToCSV() {
@@ -177,11 +167,8 @@ private fun dump10KReportsToCSV() {
         }
     }.joinToString(separator = ",", prefix = "ticker,"))
 
-    Database.getSP500Tickers().forEach {
-        val reports = Database.database.getCollection<ReportReference>("sp500")
-        val allReports = reports
-            .find("{ticker: '$it'}")
-            .batchSize(10000).toList()
+    Database.getSP500Companies().forEach {
+        val allReports = it.cik.flatMap { Database.getReportReferencesByCik(it.toString()) }.filter { it.formType == "10-K" }
 
         val byFiscalYear = getByFiscalYear(allReports)
 
@@ -191,7 +178,7 @@ private fun dump10KReportsToCSV() {
                     prop.get(it)?.value?.toBigDecimal()?.toPlainString()?.toString() ?: "null"
                 }
             }
-        }.joinToString(separator = ",", prefix = "$it,")
+        }.joinToString(separator = ",", prefix = "${it.primaryTicker},")
         buffer.appendln(entry)
     }
 
@@ -215,6 +202,26 @@ fun getByFiscalYear(reports: List<ReportReference>): Map<Int, ReportReference> {
 
 private fun fixReportRefsPointingToExtracts() {
     val reports = Database.reportIndex.find("{'reportFiles.visualReport': {\$regex : '.*ex.*'}}").toList()
-    resolveFileNames(reports)
+    reports.groupBy { it.ticker }.filter { it.key != null }.forEach { companyReports ->
+        println("Downloading ${companyReports.key}")
+        repeat(3) {
+            try {
+                runBlocking {
+                    val downloadedStuff = companyReports.value
+                        .mapAsync {
+                            it.copy(reportFiles = fetchRelevantFileNames(it))
+                        }.awaitAll()
+
+                    downloadedStuff.forEach { Database.reportIndex.save(it) }
+                    if (downloadedStuff.isNotEmpty()) {
+                        delay(1000)
+                    }
+                }
+                return@forEach
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
 }
 
