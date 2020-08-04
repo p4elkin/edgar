@@ -89,7 +89,7 @@ class CurrentIndexCrawler {
                 it.mapAsync { collectFilingData(it) }
                     .awaitAll()
                     .forEach { Database.reportIndex.save(it) }
-                delay(10000)
+                delay(60000)
             }
         }
     }
