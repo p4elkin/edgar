@@ -1,9 +1,11 @@
 package fi.avp.edgar
 
 import fi.avp.edgar.data.attrNames
+import fi.avp.edgar.mining.*
 import org.junit.Test
+import org.litote.kmongo.deleteOneById
+import org.litote.kmongo.find
 import java.io.File
-import java.lang.Math.pow
 import java.time.LocalDate
 import kotlin.test.assertTrue
 
@@ -27,13 +29,50 @@ class ReportTest {
 //        )
     }
 
+
+    @Test
+    fun asynchronousResolutionOfReportsDoesntFail() {
+        val allGroupedBy = Database.reportIndex.find("{formType: '10-K'}")
+            .toList()
+            .groupBy { it.reportFiles?.xbrlReport }
+            .filterValues { it.size > 1 }
+            .forEach {
+                it.value.forEach {
+                    if (it._id == it.reference) {
+                        Database.reportIndex.deleteOneById(it._id!!)
+                    }
+                }
+            }
+
+        val reportData = getCompanyReports("AAPL")
+        val reports = Database.getReportReferencesByCik("320193")
+
+//        val parsedReports =  runBlocking {
+//            parseReports(reports, reportData)
+//        }
+
+        val withSameReportFile = reports.groupBy { it.reportFiles?.xbrlReport }.filter { it.value.size > 1 }
+
+        reports.forEach {referece ->
+            referece.reportFiles?.xbrlReport?.let {
+//                parseReport(reportData.get(it), referece)
+//                if (it == "aapl-20130928.xml") {
+//                    parseReport(Paths.get("/Users/sasha/dev/finances/data/reports/extracted/AAPL.zip/aapl-20130928.xml").toFile().inputStream(), referece)
+//                }
+            }
+        }
+
+//        assertTrue { parsedReports.size > 0 }
+    }
+
     @Test
     fun v20150331l_contains_eps_properties() {
         val file = File("src/test/resources/v-20150331.xml")
         val extractedData= parseProps(
             file.inputStream(),
             LocalDate.of(2015, 3, 31).atStartOfDay(),
-            "10-Q", false)
+            "10-Q", false
+        )
 
         assertTrue { extractedData.data
             .flatMap { it.extractedValues }
@@ -53,7 +92,8 @@ class ReportTest {
         val extractedData= parseProps(
             file.inputStream(),
             LocalDate.of(2011, 5, 31).atStartOfDay(),
-            "10-Q", false)
+            "10-Q", false
+        )
 
         val epsData = extractedData.data
             .flatMap { it.extractedValues.filter { it.unit != null } }
@@ -83,7 +123,8 @@ class ReportTest {
         val extractedData= parseProps(
             file.inputStream(),
             LocalDate.of(2013, 5, 9).atStartOfDay(),
-            "10-Q", false)
+            "10-Q", false
+        )
 
         assertTrue{ extractedData.data.flatMap{ it.extractedValues }.find { it.propertyId == "SalesRevenueNet" } != null}
     }
@@ -94,18 +135,20 @@ class ReportTest {
         val extractedData= parseProps(
             file.inputStream(),
             LocalDate.of(2019, 6, 30).atStartOfDay(),
-            "10-Q", true)
+            "10-Q", true
+        )
 
         assertTrue { extractedData.data.isNotEmpty() }
     }
 
     @Test
     fun `000091591315000018`() {
-        val file = File("src/test/resources/000091591315000018.xml")
+        val file = File("src/test/resources/wrk-10k_20190930.htm")
         val extractedData= parseProps(
             file.inputStream(),
             LocalDate.of(2015, 5, 11).atStartOfDay(),
-            "10-Q", false)
+            "10-Q", true
+        )
         assertTrue { extractedData.data.isNotEmpty() }
     }
 
@@ -116,7 +159,8 @@ class ReportTest {
             file.inputStream(),
             LocalDate.of(2011, 12, 31).atStartOfDay(),
             "10-K",
-            false)
+            false
+        )
         assertTrue { extractedData.problems.suspiciousContexts.isEmpty() }
     }
 
@@ -138,15 +182,11 @@ class ReportTest {
 
     @Test
     fun parseValue() {
-        println(parse("101.2", -8, 9.0).toBigDecimal().toPlainString())
-        println(parse("4,674,071", -3, 3.0).toBigDecimal().toPlainString())
-        println(parse("2.47", 2, 0.0).toBigDecimal().toPlainString())
-        println(parse("2.47", 0, 0.0).toBigDecimal().toPlainString())
-    }
-
-    private fun parse(str: String, decimals: Int, scale: Double): Double {
-        val withoutSeparator: Double = str.replace(",", "").replace(".", "").toDouble()
-        return withoutSeparator * pow(10.0, -decimals.toDouble())
+        println(parseValue("101.2", -8.0 ).toBigDecimal().toPlainString())
+        println(parseValue("4,674,071", -3.0 ).toBigDecimal().toPlainString())
+        println(parseValue("2.47", 2.0 ).toBigDecimal().toPlainString())
+        println(parseValue("2.47", 0.0 ).toBigDecimal().toPlainString())
+        println(parseValue("3250000000", -6.0 ).toBigDecimal().toPlainString())
     }
 
     @Test

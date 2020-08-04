@@ -1,15 +1,14 @@
 package fi.avp.edgar
 
+import fi.avp.edgar.mining.*
 import fi.avp.util.asyncGetText
 import fi.avp.util.mapAsync
 import kotlinx.coroutines.*
 import org.junit.Test
-import org.litote.kmongo.Data
 import org.litote.kmongo.gt
 import org.litote.kmongo.save
 import java.nio.charset.StandardCharsets
 import java.time.LocalDate
-import java.time.format.DateTimeFormatter
 import java.util.concurrent.Executors
 
 class IndexCrawlerKtTest {
@@ -29,9 +28,15 @@ class IndexCrawlerKtTest {
 
             filings.chunked(5).forEach {
                 it.mapAsync {
-                    val filingRef = it.copy(reportFiles = fetchRelevantFileNames(it))
+                    val filingRef = it.copy(reportFiles = fetchRelevantFileNames(
+                        it
+                    )
+                    )
                     downloadSingleReport(filingRef)?.xbrl?.let {
-                        parseReport(it.byteInputStream(StandardCharsets.UTF_8), filingRef)
+                        parseReport(
+                            it.byteInputStream(StandardCharsets.UTF_8),
+                            filingRef
+                        )
                     } ?: filingRef
                 }
                 .awaitAll()

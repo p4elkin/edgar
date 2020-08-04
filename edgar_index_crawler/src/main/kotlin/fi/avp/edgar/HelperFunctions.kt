@@ -1,11 +1,11 @@
 package fi.avp.edgar
 
+import fi.avp.edgar.mining.*
 import fi.avp.util.mapAsync
 import kotlinx.coroutines.*
 import org.litote.kmongo.*
 import java.lang.StringBuilder
 import java.nio.file.Paths
-import java.util.concurrent.Executors
 
 data class CompanyInfo(
     val _id: String? = null,
@@ -145,19 +145,52 @@ fun findReportsWithMultipleEPS() {
     }
 }
 
-fun fixMissingTickers() {
-    val companyList = Database.companyList
-    Database.reports.find("{ticker: null}").forEach {
-    }
-}
-
 fun main() {
-
-    dump10KReportsToCSV()
+//    dump10KReportsToCSVRowPerCompany()
+    dump10KReportsToCSVRowPerFiling()
+//    fixDecimalsInSP500AnnualReports()
 //    consolidateCompanyInfo()
 }
 
-private fun dump10KReportsToCSV() {
+val years = 2011..2019
+val metrics = mapOf(
+    "revenue" to ReportReference::revenue,
+    "netIncome" to ReportReference::netIncome,
+    "eps" to ReportReference::eps,
+    "assets" to ReportReference::revenue,
+    "financingCashFlow" to ReportReference::financingCashFlow,
+    "investingCashFlow" to ReportReference::investingCashFlow,
+    "operatingCashFlow" to ReportReference::operatingCashFlow,
+    "liabilities" to ReportReference::liabilities)
+
+fun dump10KReportsToCSVRowPerFiling() {
+    val file = Paths.get("/Users/sasha/temp/10-k-filings.csv").toFile()
+    val cols = listOf("ticker", "date").plus(metrics.keys).plus("dataUrl")
+    val buffer = StringBuilder()
+
+    buffer.appendln(cols.joinToString(separator = ","))
+    Database.getSP500Companies().forEach {companyInfo ->
+        val allReports = companyInfo.cik
+            .flatMap { Database.getReportReferencesByCik(it.toString()) }
+            .filter { it.formType == "10-K" }
+
+        allReports.forEach { filing ->
+            val metrics = metrics.map { (_, prop) ->
+                prop.get(filing)?.value?.toBigDecimal()?.toPlainString()?.toString() ?: "null"
+            }
+
+            buffer.appendln(
+                listOf(companyInfo.primaryTicker, filing.dateFiled)
+                    .plus(metrics)
+                    .plus(filing.dataUrl)
+                    .joinToString(separator = ","))
+        }
+    }
+
+    file.writeText(buffer.toString())
+}
+
+private fun dump10KReportsToCSVRowPerCompany() {
     val file = Paths.get("/Users/sasha/temp/sample.csv").toFile()
 
     val buffer = StringBuilder()
@@ -185,19 +218,32 @@ private fun dump10KReportsToCSV() {
     file.writeText(buffer.toString())
 }
 
-val years = 2011..2019
-val metrics = mapOf(
-    "revenue" to ReportReference::revenue,
-    "netIncome" to ReportReference::netIncome,
-    "eps" to ReportReference::eps,
-    "assets" to ReportReference::revenue,
-    "financingCashFlow" to ReportReference::financingCashFlow,
-    "investingCashFlow" to ReportReference::investingCashFlow,
-    "operatingCashFlow" to ReportReference::operatingCashFlow,
-    "liabilities" to ReportReference::liabilities)
 
 fun getByFiscalYear(reports: List<ReportReference>): Map<Int, ReportReference> {
     return reports.groupBy { it.fiscalYear?.toInt() ?: -1 }.filterKeys { it > 0 }.mapValues { it.value.first() }
+}
+
+fun fixDecimalsInSP500AnnualReports() {
+    val sP500Companies = Database.getSP500Companies()
+    sP500Companies.forEach {
+        val reportReferences = it.cik.flatMap {
+            Database.getReportReferencesByCik(it.toString())
+        }.filter { it.formType == "10-K" }
+
+        reportReferences.forEach {
+            Database.reportIndex.save(it.copy(
+                assets = Assets.get(it),
+                revenue = Revenue.get(it),
+                eps = Eps.get(it),
+                liabilities = Liabilities.get(it),
+                operatingCashFlow = OperatingCashFlow.get(it),
+                financingCashFlow = FinancingCashFlow.get(it),
+                investingCashFlow = InvestingCashFlow.get(it),
+                netIncome = NetIncome.get(it),
+                fiscalYear = FiscalYearExtractor.get(it)?.toLong()
+            ))
+        }
+    }
 }
 
 private fun fixReportRefsPointingToExtracts() {

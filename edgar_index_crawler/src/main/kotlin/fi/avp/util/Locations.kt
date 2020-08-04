@@ -1,9 +1,9 @@
 package fi.avp.util
 
-import fi.avp.edgar.Database
 import fi.avp.edgar.data.ReportMetadata
-import fi.avp.edgar.downloadReports
+import fi.avp.edgar.mining.downloadReports
 import java.io.BufferedInputStream
+import java.io.File
 import java.io.FileInputStream
 import java.io.InputStream
 import java.nio.file.Files
@@ -33,8 +33,13 @@ fun getReportData(ticker: String): Map<String, InputStream>? {
  }
 
  return Locations.reportsExtracted.resolve(dirName).toFile().listFiles()
-  .map { it.name to BufferedInputStream(it.inputStream()) }
+  .filterNot { itAuxillaryFile(it) }
+  .map { it.name to it.inputStream() }
   .toMap()
+}
+
+fun itAuxillaryFile(file: File): Boolean {
+    return file.name.matches(Regex("^(cashflow|balance|income-).*\\.xml\$"))
 }
 
 fun getReportDataZip(ticker: String): ZipInputStream? {
@@ -42,7 +47,7 @@ fun getReportDataZip(ticker: String): ZipInputStream? {
  if (!Files.exists(zipLocation)) {
      return null
  }
- return ZipInputStream(BufferedInputStream(FileInputStream(zipLocation.toFile())))
+ return ZipInputStream(BufferedInputStream(zipLocation.toFile().inputStream()))
 }
 
 fun companyQuarterlyReport(reportMetadata: ReportMetadata): Path? {

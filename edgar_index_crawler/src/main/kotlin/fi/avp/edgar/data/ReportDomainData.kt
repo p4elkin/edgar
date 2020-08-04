@@ -1,6 +1,6 @@
 package fi.avp.edgar.data
 
-import fi.avp.edgar.EDGAR_DATA
+import fi.avp.edgar.mining.EDGAR_DATA
 import java.time.LocalDateTime
 
 data class CompanyRef(val cik: String,
