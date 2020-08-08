@@ -47,7 +47,9 @@ data class ExtractedValue (
     // power of 10
     val scale: String,
     val context: String,
-    val unit: String?) {
+    val unit: String?,
+    // value difference since last report
+    val delta: Double? = 0.0) {
 
     fun numericValue(): Double {
         return try {
@@ -87,7 +89,7 @@ data class Period(val startDate: LocalDate, val endDate: LocalDate, val isInstan
 
 data class Context(val id: String, val period: Period?, val segment: String? = null)
 
-open class Report(val content: InputStream, val date: LocalDateTime, private val reportType: String, private val isInline: Boolean) {
+open class Report(val content: InputStream, private val reportType: String, private val isInline: Boolean) {
 
     private val contextCache = hashMapOf<String, Context?>()
     private val unitCache = hashMapOf<String, ValueUnit?>()
@@ -102,24 +104,85 @@ open class Report(val content: InputStream, val date: LocalDateTime, private val
             builderFactory.newDocumentBuilder().parse(content)
         }
 
-    private fun filterByReportPeriodProximity(nodes: List<ExtractedValue>): List<ExtractedValue> {
-        val closestToReportDate =  nodes.groupBy {
-                val endDate= contextById(it.context)?.period?.endDate?.atStartOfDay() ?: date;
-                Duration.between(endDate, date)
-            }.minBy {
-                it.key
-            }?.value ?: emptyList()
-
-        if (closestToReportDate.size == 1) {
-            return closestToReportDate
+    fun extractData(date: LocalDateTime): ReportDataExtractionResult {
+        // after resolving some basic properties - detect
+        fun getNonAmbiguousContexts(props: List<PropertyData>): Set<String> {
+            return props.filter {
+                it.extractedValues
+                    .groupBy { it.propertyId }
+                    .all { it.value.size == 1 }
+            }.flatMap {
+                it.extractedValues.map { it.context }
+            }.toSet()
         }
 
-        return closestToReportDate.groupBy {
-            val duration = contextById(it.context)?.period?.duration ?: 0
-            if (reportType == "10-Q") kotlin.math.abs(90 - duration) else kotlin.math.abs(365 - duration)
-        }.minBy {
-            it.key
-        }?.value ?: emptyList()
+        fun resolveProperty(propertyDescriptor: PropertyDescriptor): PropertyData {
+
+            fun filterByReportPeriodProximity(nodes: List<ExtractedValue>): List<ExtractedValue> {
+                val closestToReportDate =  nodes.groupBy {
+                    val endDate= contextById(it.context)?.period?.endDate?.atStartOfDay() ?: date;
+                    Duration.between(endDate, date)
+                }.minBy {
+                    it.key
+                }?.value ?: emptyList()
+
+                if (closestToReportDate.size == 1) {
+                    return closestToReportDate
+                }
+
+                return closestToReportDate.groupBy {
+                    val duration = contextById(it.context)?.period?.duration ?: 0
+                    if (reportType == "10-Q") kotlin.math.abs(90 - duration) else kotlin.math.abs(365 - duration)
+                }.minBy {
+                    it.key
+                }?.value ?: emptyList()
+            }
+
+            // Fetch all the variants
+            val resolvedVariants = propertyDescriptor.variants
+                .flatMap { variantId ->
+                    resolveNodes(variantId).list().map { extractValue(it, variantId) }
+                }
+
+            val actualisedMetrics = filterByReportPeriodProximity(resolvedVariants)
+            return PropertyData(propertyDescriptor, actualisedMetrics,
+                actualisedMetrics
+                    .map { contextById(it.context)!! }
+                    .toSet(),
+
+                actualisedMetrics
+                    .map { it.unit }
+                    .filterNotNull()
+                    .map { unitById(it)!! }
+                    .toSet()
+            )
+        }
+
+        val resolvedBasicProperties = attrNames.map { resolveProperty(it) }.plus(resolveDei())
+
+        val allContexts = resolvedBasicProperties
+            .flatMap { it.contexts }
+            .map { it.id to it }
+            .toMap()
+
+        val nonAmbiguousContexts = getNonAmbiguousContexts(resolvedBasicProperties)
+        val disambiguatedBasicProperties = disambiguateProperties(nonAmbiguousContexts, allContexts.values.toSet(), resolvedBasicProperties)
+        val relevantContexts = disambiguatedBasicProperties.flatMap {
+            it.extractedValues.map { contextById(it.context)!! }
+        }.toSet()
+
+        val problems = sanitiseExtractedData(relevantContexts, reportType, disambiguatedBasicProperties)
+        val data = relevantContexts.filter { it.id !in problems.suspiciousContexts }.flatMap {
+            extractAllPropertiesForContext(it.id)
+        }.map {
+            PropertyData(
+                PropertyDescriptor(variants = listOf(it.propertyId), id = it.propertyId, category = "misc"),
+                extractedValues = listOf(it),
+                contexts = setOf(allContexts[it.context]!!),
+                valueUnits = it.unit?.let { setOf(unitById(it)!!) })
+        }
+
+        return ReportDataExtractionResult(data, problems)
     }
 
     private fun getPropertyName(node: Node): String {
@@ -162,21 +225,7 @@ open class Report(val content: InputStream, val date: LocalDateTime, private val
             }
     }
 
-    fun resolveProperty(propertyDescriptor: PropertyDescriptor): PropertyData {
-        // Fetch all the variants
-        val resolvedVariants = propertyDescriptor.variants
-            .flatMap { variantId ->
-                resolveNodes(variantId).list().map { extractValue(it, variantId) }
-            }
-
-        val actualisedMetrics = filterByReportPeriodProximity(resolvedVariants)
-        return PropertyData(propertyDescriptor, actualisedMetrics,
-            actualisedMetrics.map { contextById(it.context)!! }.toSet(),
-            actualisedMetrics.map { it.unit }.filterNotNull().map { unitById(it)!! }.toSet()
-        )
-    }
-
-    private fun extractValue(node: Node, variantId: String): ExtractedValue {
+    private fun extractValue(node: Node, propertyId: String): ExtractedValue {
         // we always assume that ctx is there
         val ctx = contextById(node.attr("contextRef")?.trim()!!)
 
@@ -190,7 +239,7 @@ open class Report(val content: InputStream, val date: LocalDateTime, private val
         }
 
         return ExtractedValue(
-            variantId, node.textContent, context = ctx.id, unit = unit?.id,
+            propertyId, node.textContent, context = ctx.id, unit = unit?.id,
             scale = node.attr("scale") ?: "", decimals = node.attr("decimals") ?: ""
         )
     }
@@ -260,34 +309,6 @@ open class Report(val content: InputStream, val date: LocalDateTime, private val
         return xpath.compile(selector).evaluate(reportDoc, XPathConstants.NODE) as Node?
     }
 
-    fun extractData(): ReportDataExtractionResult {
-        val resolvedBasicProperties = attrNames.map { resolveProperty(it) }.plus(resolveDei())
-        val allContexts = resolvedBasicProperties
-            .flatMap { it.contexts }
-            .map { it.id to it }
-            .toMap()
-
-
-        val nonAmbiguousContexts = getNonAmbiguousContexts(resolvedBasicProperties)
-        val disambiguatedBasicProperties = disambiguateProperties(nonAmbiguousContexts, allContexts.values.toSet(), resolvedBasicProperties)
-        val relevantContexts = disambiguatedBasicProperties.flatMap {
-            it.extractedValues.map { contextById(it.context)!! }
-        }.toSet()
-
-        val problems = sanitiseExtractedData(relevantContexts, reportType, disambiguatedBasicProperties)
-        val data = relevantContexts.filter { it.id !in problems.suspiciousContexts }.flatMap {
-            extractAllPropertiesForContext(it.id)
-        }.map {
-            PropertyData(
-                PropertyDescriptor(variants = listOf(it.propertyId), id = it.propertyId, category = "misc"),
-                extractedValues = listOf(it),
-                contexts = setOf(allContexts[it.context]!!),
-                valueUnits = it.unit?.let { setOf(unitById(it)!!) })
-        }
-
-        return ReportDataExtractionResult(data, problems)
-    }
-
     private fun disambiguateProperties(nonAmbiguousContexts: Set<String>, allContexts: Set<Context>, data: List<PropertyData>): List<PropertyData> {
         return data.map {
             val contexts = it.extractedValues
@@ -295,6 +316,7 @@ open class Report(val content: InputStream, val date: LocalDateTime, private val
                 .map { contextId -> allContexts.find { it.id == contextId }!! }
                 .toSet()
 
+            // first prefer nonAm
             var contextSet = contexts
                 .filter {nonAmbiguousContexts.contains(it.id) }.toSet()
 
@@ -316,14 +338,6 @@ open class Report(val content: InputStream, val date: LocalDateTime, private val
                 )
             }
         }
-    }
-
-    private fun getNonAmbiguousContexts(props: List<PropertyData>): Set<String> {
-        return props.filter {
-            it.extractedValues.groupBy { it.propertyId }.all { it.value.size == 1 }
-        }.flatMap {
-            it.extractedValues.map { it.context }
-        }.toSet()
     }
 
     private fun sanitiseExtractedData(contexts: Set<Context>, reportType: String, resolvedData: List<PropertyData>): ReportProblems {

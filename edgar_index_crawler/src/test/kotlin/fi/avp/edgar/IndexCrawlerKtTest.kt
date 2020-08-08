@@ -18,7 +18,7 @@ class IndexCrawlerKtTest {
     @Test
     fun crawlLatestIndexReturnsCorrectFileRecord() {
         runBlocking(taskDispatcher) {
-            Database.reportIndex.deleteMany(ReportReference::dateFiled gt LocalDate.now().minusDays(3))
+            Database.filings.deleteMany(Filing::dateFiled gt LocalDate.now().minusDays(3))
             val filings = getFilingsAfter(LocalDate.now().minusDays(3))
                 .flatMap {
                     asyncGetText(it.url)
@@ -33,7 +33,7 @@ class IndexCrawlerKtTest {
                     )
                     )
                     downloadSingleReport(filingRef)?.xbrl?.let {
-                        parseReport(
+                        parseFiling(
                             it.byteInputStream(StandardCharsets.UTF_8),
                             filingRef
                         )
@@ -41,7 +41,7 @@ class IndexCrawlerKtTest {
                 }
                 .awaitAll()
                 .forEach {
-                    Database.reportIndex.save(it)
+                    Database.filings.save(it)
                 }
 
                 delay(5000)

@@ -1,25 +1,30 @@
 package fi.avp.edgar.mining
 
-import fi.avp.util.mapAsync
-import kotlinx.coroutines.asCoroutineDispatcher
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
-import org.litote.kmongo.find
-import org.litote.kmongo.getCollection
-import org.litote.kmongo.updateOne
-import java.util.concurrent.Executors
+import kotlin.math.ceil
 
 data class Metric(
-    val value: Double?,
+    val value: Double? = 0.0,
     val unit: String?,
     val context: String,
     val involvedProperties: Set<String>,
     val formula: String,
-    val notes: String?)
+    val notes: String?,
+    val yearToYearChange: Double? = 0.0) {
+
+    fun calculateYearToYear(previous: Metric?): Metric? {
+        return previous?.let {
+            copy(yearToYearChange = value!! - it.value!!)
+        }
+    }
+
+    fun relativeYearToYearChange(): Double {
+        return ceil(value!! / (value - yearToYearChange!!) * 100) / 100
+    }
+}
 
 open class NumberExtractor(val variants: Set<String>) {
 
-    fun get(report: ReportReference): Double? {
+    fun get(report: Filing): Double? {
         return report.extractedData?.find {
             it.propertyId in variants
         }?.numericValue()
@@ -59,7 +64,7 @@ object FiscalYearExtractor: NumberExtractor(setOf("dei:DocumentFiscalYearFocus")
 
 open class MetricExtractor(val variants: Set<String>, val primaryVariants: Set<String>, val compoundVariants: Set<String>) {
 
-    fun get(report: ReportReference): Metric? {
+    fun get(report: Filing): Metric? {
         val possibleValue = report.extractedData?.find {
             it.propertyId in variants
         }
@@ -88,7 +93,7 @@ open class MetricExtractor(val variants: Set<String>, val primaryVariants: Set<S
     }
 
 
-    private fun extractCompoundMetric(report: ReportReference): Metric? {
+    private fun extractCompoundMetric(report: Filing): Metric? {
         val compoundMetrics = report.extractedData?.filter {
             it.propertyId in compoundVariants
         } ?: emptyList()
@@ -161,24 +166,6 @@ object Revenue: MetricExtractor(
         "SalesRevenueNet")
 )
 
-fun extractMetrics(update: (ReportReference) -> ReportReference) {
-    val reports = Database.database.getCollection<ReportReference>("sp500")
-    val allReports = reports
-        .find("{formType: '10-K'}")
-        .batchSize(10000).toList()
-
-    println("analyzing ${allReports.size} reports")
-    runBlocking {
-        withContext(Executors.newFixedThreadPool(16).asCoroutineDispatcher()) {
-            allReports.chunked(100).mapAsync {
-                it.forEach {
-                    reports.updateOne(update(it))
-                }
-            }
-        }
-        println("done")
-    }
-}
 
 fun main() {
 }

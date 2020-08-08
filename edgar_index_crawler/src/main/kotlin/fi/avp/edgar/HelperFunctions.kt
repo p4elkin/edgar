@@ -6,6 +6,7 @@ import kotlinx.coroutines.*
 import org.litote.kmongo.*
 import java.lang.StringBuilder
 import java.nio.file.Paths
+import java.util.concurrent.Executors
 
 data class CompanyInfo(
     val _id: String? = null,
@@ -124,14 +125,14 @@ fun consolidateCompanyInfo() {
 
 fun moveSP500Reports() {
     val tickers = Database.getSP500Tickers()
-    val sp500 = Database.database.getCollection("sp500", ReportReference::class.java)
-    Database.reportIndex.find().toList().filter { it.ticker in tickers }.forEach {
+    val sp500 = Database.database.getCollection("sp500", Filing::class.java)
+    Database.filings.find().toList().filter { it.ticker in tickers }.forEach {
         sp500.save(it)
     }
 }
 
 fun findReportsWithMultipleEPS() {
-    val reports = Database.database.getCollection<ReportReference>("sp500")
+    val reports = Database.database.getCollection<Filing>("sp500")
     val allReports = reports
         .find()
         .batchSize(10000).toList()
@@ -154,14 +155,33 @@ fun main() {
 
 val years = 2011..2019
 val metrics = mapOf(
-    "revenue" to ReportReference::revenue,
-    "netIncome" to ReportReference::netIncome,
-    "eps" to ReportReference::eps,
-    "assets" to ReportReference::revenue,
-    "financingCashFlow" to ReportReference::financingCashFlow,
-    "investingCashFlow" to ReportReference::investingCashFlow,
-    "operatingCashFlow" to ReportReference::operatingCashFlow,
-    "liabilities" to ReportReference::liabilities)
+    "revenue" to Filing::revenue,
+    "netIncome" to Filing::netIncome,
+    "eps" to Filing::eps,
+    "assets" to Filing::revenue,
+    "financingCashFlow" to Filing::financingCashFlow,
+    "investingCashFlow" to Filing::investingCashFlow,
+    "operatingCashFlow" to Filing::operatingCashFlow,
+    "liabilities" to Filing::liabilities)
+
+fun extractMetrics(update: (Filing) -> Filing) {
+    val reports = Database.database.getCollection<Filing>("sp500")
+    val allReports = reports
+        .find("{formType: '10-K'}")
+        .batchSize(10000).toList()
+
+    println("analyzing ${allReports.size} reports")
+    runBlocking {
+        withContext(Executors.newFixedThreadPool(16).asCoroutineDispatcher()) {
+            allReports.chunked(100).mapAsync {
+                it.forEach {
+                    reports.updateOne(update(it))
+                }
+            }
+        }
+        println("done")
+    }
+}
 
 fun dump10KReportsToCSVRowPerFiling() {
     val file = Paths.get("/Users/sasha/temp/10-k-filings.csv").toFile()
@@ -171,7 +191,7 @@ fun dump10KReportsToCSVRowPerFiling() {
     buffer.appendln(cols.joinToString(separator = ","))
     Database.getSP500Companies().forEach {companyInfo ->
         val allReports = companyInfo.cik
-            .flatMap { Database.getReportReferencesByCik(it.toString()) }
+            .flatMap { Database.getFilingsByCik(it.toString()) }
             .filter { it.formType == "10-K" }
 
         allReports.forEach { filing ->
@@ -201,7 +221,7 @@ private fun dump10KReportsToCSVRowPerCompany() {
     }.joinToString(separator = ",", prefix = "ticker,"))
 
     Database.getSP500Companies().forEach {
-        val allReports = it.cik.flatMap { Database.getReportReferencesByCik(it.toString()) }.filter { it.formType == "10-K" }
+        val allReports = it.cik.flatMap { Database.getFilingsByCik(it.toString()) }.filter { it.formType == "10-K" }
 
         val byFiscalYear = getByFiscalYear(allReports)
 
@@ -219,19 +239,19 @@ private fun dump10KReportsToCSVRowPerCompany() {
 }
 
 
-fun getByFiscalYear(reports: List<ReportReference>): Map<Int, ReportReference> {
+fun getByFiscalYear(reports: List<Filing>): Map<Int, Filing> {
     return reports.groupBy { it.fiscalYear?.toInt() ?: -1 }.filterKeys { it > 0 }.mapValues { it.value.first() }
 }
 
 fun fixDecimalsInSP500AnnualReports() {
     val sP500Companies = Database.getSP500Companies()
     sP500Companies.forEach {
-        val reportReferences = it.cik.flatMap {
-            Database.getReportReferencesByCik(it.toString())
+        val filing = it.cik.flatMap {
+            Database.getFilingsByCik(it.toString())
         }.filter { it.formType == "10-K" }
 
-        reportReferences.forEach {
-            Database.reportIndex.save(it.copy(
+        filing.forEach {
+            Database.filings.save(it.copy(
                 assets = Assets.get(it),
                 revenue = Revenue.get(it),
                 eps = Eps.get(it),
@@ -242,31 +262,6 @@ fun fixDecimalsInSP500AnnualReports() {
                 netIncome = NetIncome.get(it),
                 fiscalYear = FiscalYearExtractor.get(it)?.toLong()
             ))
-        }
-    }
-}
-
-private fun fixReportRefsPointingToExtracts() {
-    val reports = Database.reportIndex.find("{'reportFiles.visualReport': {\$regex : '.*ex.*'}}").toList()
-    reports.groupBy { it.ticker }.filter { it.key != null }.forEach { companyReports ->
-        println("Downloading ${companyReports.key}")
-        repeat(3) {
-            try {
-                runBlocking {
-                    val downloadedStuff = companyReports.value
-                        .mapAsync {
-                            it.copy(reportFiles = fetchRelevantFileNames(it))
-                        }.awaitAll()
-
-                    downloadedStuff.forEach { Database.reportIndex.save(it) }
-                    if (downloadedStuff.isNotEmpty()) {
-                        delay(1000)
-                    }
-                }
-                return@forEach
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
         }
     }
 }

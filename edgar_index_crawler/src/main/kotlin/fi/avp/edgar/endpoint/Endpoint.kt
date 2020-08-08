@@ -1,6 +1,5 @@
 package fi.avp.edgar.endpoint
 
-import com.mongodb.BasicDBObject
 import fi.avp.edgar.mining.*
 import fi.avp.util.asyncGetText
 import fi.avp.util.mapAsync
@@ -21,7 +20,6 @@ import org.springframework.web.cors.reactive.CorsWebFilter
 import org.springframework.web.cors.reactive.UrlBasedCorsConfigurationSource
 import reactor.core.publisher.Flux
 import reactor.core.publisher.toFlux
-import java.nio.charset.StandardCharsets
 import java.time.LocalDate
 import java.util.concurrent.Executors
 
@@ -48,47 +46,25 @@ fun main(args: Array<String>) {
     runApplication<SecReportDataApplication>(*args)
 }
 
-public suspend fun collectFilingData(it: ReportReference): ReportReference {
-    val filingReference = it.copy(reportFiles = fetchRelevantFileNames(it))
-    delay(10000)
-
-    val data = downloadSingleReport(filingReference)
-    return data?.xbrl?.let {
-        parseReport(
-            it.byteInputStream(StandardCharsets.UTF_8),
-            filingReference
-        )
-    } ?: filingReference
-}
-
-suspend fun getFilingInformation(ref: ReportReference): Deferred<ReportReference> {
-    return if (ref.processed)
-        CompletableDeferred(ref)
-    else coroutineScope {
-        async {
-            collectFilingData(ref)
-        }
-    }
-}
 
 @Component
 class CurrentIndexCrawler {
 
-    @Scheduled(fixedRate = 24 * 60 * 60 * 1000)
+//    @Scheduled(fixedRate = 24 * 60 * 60 * 1000)
     fun crawl() {
         runBlocking(Executors.newFixedThreadPool(8).asCoroutineDispatcher()) {
-            val filings = getFilingsAfter(LocalDate.now().minusDays(5))
+            val filings = getFilingsAfter(LocalDate.now().minusDays(1))
                 .flatMap {
                     asyncGetText(it.url)
                         .split("\n")
                         .mapNotNull { resolveFilingInfoFromIndexRecord(it) }
-                        .filter { Database.reportIndex.findOne("{dataUrl: '${it.dataUrl}'}") == null }
+                        .filter { Database.filings.findOne("{dataUrl: '${it.dataUrl}'}") == null }
                 }
 
-            filings.chunked(2).forEach {
-                it.mapAsync { collectFilingData(it) }
+            filings.filter { !it.processed }.chunked(2).forEach {
+                it.mapAsync { resolveYearToYearChanges(it) }
                     .awaitAll()
-                    .forEach { Database.reportIndex.save(it) }
+                    .forEach { Database.filings.save(it) }
                 delay(60000)
             }
         }
@@ -97,29 +73,9 @@ class CurrentIndexCrawler {
     @RestController
     open class Endpoint() {
 
-        val collection = Database.database.getCollection("annual", ReportRecord::class.java)
-
-        @GetMapping(value = ["/{ticker}/{reportType}"], produces = [MediaType.APPLICATION_JSON_VALUE])
-        fun prices(
-            @PathVariable(value = "ticker") ticker: String,
-            @PathVariable(value = "reportType") reportType: String
-        ): Flux<CompanyReports> {
-            val aggregationResult = collection.aggregate<CompanyReports>(
-                "{\$match: {ticker: '$ticker'}}",
-                "{\$project: {ticker: 1, reports: {\$filter: {input: '\$reports', as: 'rep', cond: {\$eq: ['\$\$rep._id', '$reportType']}}}}}"
-            ).toList()
-
-            return aggregationResult.toFlux()
-        }
-
         @GetMapping(value = ["/latestFilings"], produces = [MediaType.APPLICATION_JSON_VALUE])
         fun latestReports(): List<FilingDTO> {
-            val sortCriteria = BasicDBObject("dateFiled", -1)
-            val latestFilings = Database.reportIndex
-                .find(ReportReference::dateFiled gt LocalDate.now().minusDays(10))
-                .sort(sortCriteria)
-                .limit(100)
-                .toList()
+            val latestFilings = Database.getLatestFilings(10)
 
             return latestFilings
                 .filter {
@@ -134,7 +90,18 @@ class CurrentIndexCrawler {
                         reportLink,
                         interactiveData = interactiveData,
                         date = it.dateFiled!!,
-                        type = it.formType!!
+                        type = it.formType!!,
+                        epsYY = it.eps?.relativeYearToYearChange() ?: Double.NaN,
+                        eps = it.eps?.value ?: Double.NaN,
+
+                        revenueYY = it.revenue?.relativeYearToYearChange() ?: Double.NaN,
+                        revenue = it.revenue?.value ?: Double.NaN,
+
+                        netIncomeYY = it.netIncome?.relativeYearToYearChange() ?: Double.NaN,
+                        netIncome = it.netIncome?.value ?: Double.NaN,
+
+                        liabilitiesYY = it.liabilities?.relativeYearToYearChange() ?: Double.NaN,
+                        liabilities = it.liabilities?.value ?: Double.NaN
                     )
                 }
         }
@@ -146,6 +113,14 @@ class CurrentIndexCrawler {
         val reportLink: String,
         val interactiveData: String,
         val date: LocalDate,
-        val type: String
+        val type: String,
+        val epsYY: Double,
+        val eps: Double,
+        val revenueYY: Double,
+        val revenue: Double,
+        val netIncomeYY: Double,
+        val netIncome: Double,
+        val liabilitiesYY: Double,
+        val liabilities: Double
     )
 }

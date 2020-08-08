@@ -1,69 +1,15 @@
 package fi.avp.edgar
 
-import fi.avp.edgar.data.attrNames
 import fi.avp.edgar.mining.*
+import kotlinx.coroutines.runBlocking
 import org.junit.Test
-import org.litote.kmongo.deleteOneById
-import org.litote.kmongo.find
+import org.litote.kmongo.eq
 import java.io.File
 import java.time.LocalDate
 import kotlin.test.assertTrue
 
 
 class ReportTest {
-
-    @Test
-    fun test() {
-        val file = File("src/test/resources/a10-qq1202012282019.htm")
-        val report = Report(
-            file.inputStream(),
-            LocalDate.of(2012, 7, 25).atStartOfDay(),
-            "10-Q",
-            true
-        )
-
-        val props = report.resolveProperty(attrNames.find { it.id == "revenue" }!!)
-//        val resolveProperty = disambiguateProperties(
-//            getNonAmbiguousContexts(listOf(props)),
-//            listOf(props)
-//        )
-    }
-
-
-    @Test
-    fun asynchronousResolutionOfReportsDoesntFail() {
-        val allGroupedBy = Database.reportIndex.find("{formType: '10-K'}")
-            .toList()
-            .groupBy { it.reportFiles?.xbrlReport }
-            .filterValues { it.size > 1 }
-            .forEach {
-                it.value.forEach {
-                    if (it._id == it.reference) {
-                        Database.reportIndex.deleteOneById(it._id!!)
-                    }
-                }
-            }
-
-        val reportData = getCompanyReports("AAPL")
-        val reports = Database.getReportReferencesByCik("320193")
-
-//        val parsedReports =  runBlocking {
-//            parseReports(reports, reportData)
-//        }
-
-        val withSameReportFile = reports.groupBy { it.reportFiles?.xbrlReport }.filter { it.value.size > 1 }
-
-        reports.forEach {referece ->
-            referece.reportFiles?.xbrlReport?.let {
-//                parseReport(reportData.get(it), referece)
-//                if (it == "aapl-20130928.xml") {
-//                    parseReport(Paths.get("/Users/sasha/dev/finances/data/reports/extracted/AAPL.zip/aapl-20130928.xml").toFile().inputStream(), referece)
-//                }
-            }
-        }
-
-//        assertTrue { parsedReports.size > 0 }
-    }
 
     @Test
     fun v20150331l_contains_eps_properties() {
@@ -77,6 +23,14 @@ class ReportTest {
         assertTrue { extractedData.data
             .flatMap { it.extractedValues }
             .filter { it.propertyId.toLowerCase().contains("earningspershare") }.isNotEmpty() }
+    }
+
+    @Test
+    fun resolveYearToYearChangesForLatestAppleFiling() {
+        val latestFiling = Database.getFilingsByTicker("AAPL").maxBy { it.dateFiled!! }
+        val updated = runBlocking {
+            resolveYearToYearChanges(latestFiling!!)
+        }
     }
 
     @Test
@@ -168,7 +122,7 @@ class ReportTest {
     fun mapCompanyReportRecordsToData() {
         val dataStream = getCompanyReports("AAPL")
         val appleRefs =
-            Database.getReportReferencesByTicker("AAPL").map {
+            Database.getFilingsByTicker("AAPL").map {
                 it to dataStream.get("${it.reference}.xml")
             }.toMap()
         assertTrue { appleRefs.isNotEmpty() }
@@ -178,6 +132,17 @@ class ReportTest {
     fun bxp_20130331_doesNotContainUnnecessaryContexts() {
         val reportDataExtractionResult = reportDataExtractionResult(
             "bxp-20130331.xml", 2013, 3, 31)
+    }
+
+    @Test
+    fun getPreviousYearQuarterFiling() {
+        Database.filings.find(Filing::_id eq "5f29a0eafaaf3c66cf17b177").first()?.let {
+            runBlocking {
+                getPreviousYearFiling(it)?.let {
+                    println(it)
+                }
+            }
+        }
     }
 
     @Test

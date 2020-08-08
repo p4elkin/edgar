@@ -23,8 +23,8 @@ data class ReportFiles(
     val financialSummary: String?)
 
 private val xmlXBRLReportPattern = Regex("(.*)_cal.xml")
-suspend fun fetchRelevantFileNames(reportReference: ReportReference): ReportFiles {
-    val reportBaseUrl = reportReference.dataUrl
+suspend fun fetchRelevantFileNames(filing: Filing): ReportFiles {
+    val reportBaseUrl = filing.dataUrl
     val index = asyncJson("$reportBaseUrl/index.json")
 
     val reportNode = index["directory"]["item"]
@@ -66,12 +66,12 @@ fun downloadXBRL() {
             println("Downloading $primaryTicker")
             downloadReports(
                 primaryTicker,
-                it.tickers.flatMap { Database.getReportReferencesByTicker(it) })
+                it.tickers.flatMap { Database.getFilingsByTicker(it) })
         }
     }
 }
 
-fun downloadReports(ticker: String, refs: List<ReportReference>) {
+fun downloadReports(ticker: String, refs: List<Filing>) {
     println("Downloading ${ticker}")
             runBlocking {
                 val downloadedStuff = refs
@@ -88,23 +88,23 @@ fun downloadReports(ticker: String, refs: List<ReportReference>) {
             }
 }
 
-suspend fun downloadSingleReport(reportReference: ReportReference): XBRL? {
+suspend fun downloadSingleReport(filing: Filing): XBRL? {
     var result: XBRL?
     for (trialIndex in 0..2) {
         try {
             val (xbrl, income, cashflow, balance) = listOf(
-                reportReference.reportFiles?.xbrlReport,
-                reportReference.reportFiles?.income,
-                reportReference.reportFiles?.cashFlow,
-                reportReference.reportFiles?.balance)
+                filing.reportFiles?.xbrlReport,
+                filing.reportFiles?.income,
+                filing.reportFiles?.cashFlow,
+                filing.reportFiles?.balance)
                 .mapAsync {
                     it?.let {
-                        asyncGetText("${reportReference.dataUrl}/$it")
+                        asyncGetText("${filing.dataUrl}/$it")
                     }
                 }.awaitAll()
 
             result = XBRL(
-                reportReference.reportFiles!!.xbrlReport!!,
+                filing.reportFiles!!.xbrlReport!!,
                 xbrl,
                 cashflow,
                 balance,
@@ -112,11 +112,11 @@ suspend fun downloadSingleReport(reportReference: ReportReference): XBRL? {
 
             return result
         } catch (e: Exception) {
-            println("Failed to parse ${reportReference.reportFiles?.xbrlReport} due to ${e.message}, retrying")
+            println("Failed to parse ${filing.reportFiles?.xbrlReport} due to ${e.message}, retrying")
         }
     }
 
-    println("Failed to parse ${reportReference.reportFiles?.xbrlReport} after 3 attempts")
+    println("Failed to parse ${filing.reportFiles?.xbrlReport} after 3 attempts")
 
     return null
 }

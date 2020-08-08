@@ -17,19 +17,19 @@ fun main() {
     Database.getSP500Companies().forEach {
         val companyInfo = it
         val doneIn = measureTimeMillis {
-            val reportReferences =
-                it.cik.flatMap { Database.getReportReferencesByCik(it.toString()) }.filter { it.formType == "10-K" }
+            val filings =
+                it.cik.flatMap { Database.getFilingsByCik(it.toString()) }.filter { it.formType == "10-K" }
 
             val reportData = getCompanyReports(it.primaryTicker)
 
-            reportReferences.forEach {
+            filings.forEach {
                 extractCashflowReconciliationData(it, companyInfo, reportData)
             }
         }
     }
 }
 
-private fun extractCashflowReconciliationData(filing: ReportReference, companyInfo: CompanyInfo, reportData: Map<String, InputStream>) {
+private fun extractCashflowReconciliationData(filing: Filing, companyInfo: CompanyInfo, reportData: Map<String, InputStream>) {
     val cashFlowStatment = filing.reportFiles?.cashFlow
     if (cashFlowStatment == null) {
         println("${companyInfo.primaryTicker} ${filing.dateFiled} ${filing.dataUrl}")

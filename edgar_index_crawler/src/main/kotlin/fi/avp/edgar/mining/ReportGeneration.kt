@@ -97,7 +97,7 @@ fun getTicker(companyName: String): String? {
 private fun generateReport(companyName: String, prop: String, reportType: String, category: String): ReportSeries? {
     return try {
         // TODO("adapt to the change of the collection")
-        Database.reportIndex.aggregate<ReportSeries>(
+        Database.filings.aggregate<ReportSeries>(
             // filter to reports of specific company
             "{\$match: {name: '$companyName', type: '$reportType'}}",
             // include only some props

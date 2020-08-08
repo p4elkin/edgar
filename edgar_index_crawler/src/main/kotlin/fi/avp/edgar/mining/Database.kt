@@ -1,9 +1,11 @@
 package fi.avp.edgar.mining
 
+import com.mongodb.BasicDBObject
 import fi.avp.edgar.CompanyInfo
 import org.litote.kmongo.KMongo
 import org.litote.kmongo.find
 import org.litote.kmongo.getCollection
+import org.litote.kmongo.gt
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
@@ -13,7 +15,7 @@ object Database {
 
     val database = client.getDatabase("sec-report") //normal java driver usage
     val reports = database.getCollection("reports", ReportRecord::class.java)
-    val reportIndex = database.getCollection("report-index", ReportReference::class.java)
+    val filings = database.getCollection("report-index", Filing::class.java)
     val xbrl = database.getCollection("xbrl", XBRL::class.java)
     val sp500 = database.getCollection("s-and-p-500")
 
@@ -31,30 +33,38 @@ object Database {
     }
 
     fun getTickers(): List<String> {
-        return reportIndex.distinct("ticker", String::class.java).toList()
+        return filings.distinct("ticker", String::class.java).toList()
     }
 
-    fun getReportReferencesByCik(cik: String): List<ReportReference> {
+    fun getFilingsByCik(cik: String): List<Filing> {
         return try {
-            reportIndex.find("{cik: '$cik'}").toList()
+            filings.find("{cik: '$cik'}").toList()
         } catch (e: Exception) {
             return emptyList()
         }
     }
 
-    fun getReportReferencesByTicker(ticker: String): List<ReportReference> {
-        return reportIndex.find("{ticker: '$ticker'}").toList()
+    fun getFilingsByTicker(ticker: String): List<Filing> {
+        return filings.find("{ticker: '$ticker'}").toList()
+    }
+
+    fun getLatestFilings(days: Int): List<Filing> {
+        val sortCriteria = BasicDBObject("dateFiled", -1)
+        return filings
+            .find(Filing::dateFiled gt LocalDate.now().minusDays(days.toLong()))
+            .sort(sortCriteria)
+            .toList()
     }
 }
 
 data class XBRL(val reportFileName: String, val xbrl: String?, val cashFlow: String?, val balanceSheet: String?, val incomeStatement: String?)
 
 val filingReferencePattern = Regex("^(.*?)\\s+(10-k|10-Q)\\s+(\\d+)\\s+(\\d+)\\s+(.+.htm)")
-fun resolveFilingInfoFromIndexRecord(indexRecord: String): ReportReference? {
+fun resolveFilingInfoFromIndexRecord(indexRecord: String): Filing? {
     return filingReferencePattern.find(indexRecord)?.let {
         val groups = it.groups
         val dataUrl = groups[5]?.value?.replace("-", "")?.replace("index.htm", "")
-        ReportReference(
+        Filing(
             ticker = Database.companyList.find { it.cik.contains(groups[3]!!.value.toInt()) }?.primaryTicker
                 ?: "",
             companyName = groups[1]!!.value,
@@ -72,7 +82,7 @@ fun resolveFilingInfoFromIndexRecord(indexRecord: String): ReportReference? {
     }
 }
 
-data class ReportReference(
+data class Filing(
     var _id: String? = null,
     val cik: String?,
     val dateFiled: LocalDate?,

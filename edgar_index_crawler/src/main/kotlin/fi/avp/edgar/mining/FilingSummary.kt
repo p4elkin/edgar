@@ -37,30 +37,30 @@ open class FilingSummary(private val summaryStream: InputStream) {
     }
 
     fun getConsolidatedStatementOfIncome(): String? {
-        return findReportRefNode("of income") ?: findReportRefNode("")
+        return findFilingNode("of income") ?: findFilingNode("")
     }
 
     fun getConsolidatedBalanceSheet(): String? {
-        return findReportRefNode("balance sheet")
+        return findFilingNode("balance sheet")
     }
 
     fun getConsolidatedStatementOfOperation(): String? {
-        return findReportRefNode("of operation")
+        return findFilingNode("of operation")
     }
 
     fun getConsolidatedStatementOfCashFlow(): String? {
-        return findReportRefNode("cash flow")
+        return findFilingNode("cash flow")
     }
 
     fun getFinancialSummary(): String? {
-        return findReportRefNode("financial summary")
+        return findFilingNode("financial summary")
     }
 
-    private fun findReportRefNode(title: String): String? {
-        val reportRefNode = reports?.list()?.find {
+    private fun findFilingNode(title: String): String? {
+        val filingNode = reports?.list()?.find {
             it.find("ShortName")?.textContent?.toLowerCase()?.contains(title) ?: false
         }
 
-        return (reportRefNode?.find("XmlFileName") ?: reportRefNode?.find("HtmlFileName"))?.textContent
+        return (filingNode?.find("XmlFileName") ?: filingNode?.find("HtmlFileName"))?.textContent
     }
 }
