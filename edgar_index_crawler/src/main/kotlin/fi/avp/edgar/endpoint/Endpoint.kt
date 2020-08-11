@@ -11,6 +11,7 @@ import org.springframework.boot.runApplication
 import org.springframework.context.annotation.Bean
 import org.springframework.http.MediaType
 import org.springframework.scheduling.annotation.EnableScheduling
+import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RequestParam
@@ -88,21 +89,18 @@ data class FilingDTO(
 @Component
 class CurrentIndexCrawler {
 
-    //    @Scheduled(fixedRate = 24 * 60 * 60 * 1000)
+    @Scheduled(fixedRate = 24 * 60 * 60 * 1000)
     fun crawl() {
         runBlocking(Executors.newFixedThreadPool(8).asCoroutineDispatcher()) {
-            val filings = getFilingsAfter(LocalDate.now().minusDays(1))
+            getFilingsAfter(LocalDate.now().minusDays(1))
                 .flatMap {
                     asyncGetText(it.url)
                         .split("\n")
                         .mapNotNull { resolveFilingInfoFromIndexRecord(it) }
                         .map { Database.tryResolveExisting(it) }
                 }
-
-            filings
-                .filter { !it.processed }
                 // process filings in batches by two
-                .chunked(2)
+                .chunked(5)
                 .forEach {
                     // resolve everything up to the year to year changes
                     it.mapAsync { scrapeFilingFacts(it) }
@@ -119,7 +117,7 @@ class CurrentIndexCrawler {
         val filingById: Map<String, Filing>
 
         init {
-            filingById = filings.map { it._id!! to it  }.toMap()
+            filingById = filings.map { it._id!! to it }.toMap()
             relatedAnnualReports = filings
                 .filter { it.closestYearReportId != null }
                 .map { it to filingById[it.closestYearReportId]!! }
@@ -130,12 +128,12 @@ class CurrentIndexCrawler {
     @RestController
     open class Endpoint() {
 
-        private val filings = runBlocking {
-            Database.filings.find(Filing::dateFiled gt LocalDate.now().minusDays(2000)).toList()
-        }
+//        private val filings = runBlocking {
+//            Database.filings.find(Filing::dateFiled gt LocalDate.now().minusDays(2000)).toList()
+//        }
 
         private val cache = runBlocking {
-            Database.filings.find(Filing::dateFiled gt LocalDate.now().minusDays(1000)).toList()
+            Database.filings.find(Filing::dateFiled gt LocalDate.now().minusDays(100)).toList()
         }
 
         @GetMapping(value = ["/filingCount"], produces = [])
