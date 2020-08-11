@@ -2,11 +2,20 @@ package fi.avp.edgar
 
 import fi.avp.edgar.mining.*
 import fi.avp.util.mapAsync
-import kotlinx.coroutines.*
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.litote.kmongo.*
-import java.lang.StringBuilder
+import org.springframework.boot.CommandLineRunner
+import org.springframework.boot.autoconfigure.SpringBootApplication
+import org.springframework.boot.runApplication
+import org.springframework.context.ApplicationContext
+import org.springframework.context.annotation.Bean
 import java.nio.file.Paths
+import java.time.LocalDate
 import java.util.concurrent.Executors
+import kotlin.system.measureTimeMillis
 
 data class CompanyInfo(
     val _id: String? = null,
@@ -23,6 +32,22 @@ data class SecCompanyRecord(
     val cik_str: Int,
     val title: String,
     val ticker: String)
+
+@SpringBootApplication
+open class HelperApplication {
+
+    @Bean
+    open fun helper(ctx: ApplicationContext): CommandLineRunner? {
+        return CommandLineRunner { args ->
+            resolveAnnualReportReferences()
+        }
+    }
+
+}
+
+fun main(args: Array<String>) {
+    runApplication<HelperApplication>(*args)
+}
 
 /**
  * Take the data from sec (json file extract) and company info from internet.
@@ -148,9 +173,10 @@ fun findReportsWithMultipleEPS() {
 
 fun main() {
 //    dump10KReportsToCSVRowPerCompany()
-    dump10KReportsToCSVRowPerFiling()
+//    dump10KReportsToCSVRowPerFiling()
 //    fixDecimalsInSP500AnnualReports()
 //    consolidateCompanyInfo()
+    resolveAnnualReportReferences()
 }
 
 val years = 2011..2019
@@ -181,6 +207,31 @@ fun extractMetrics(update: (Filing) -> Filing) {
         }
         println("done")
     }
+}
+
+fun resolveAnnualReportReferences() {
+    //
+
+    val ms = measureTimeMillis {
+        val startDate = LocalDate.of(2009 , 12, 31)
+        val filings = runBlocking {
+            (0..44)
+                .map {
+                     startDate.plusDays((90 * it).toLong()) to startDate.plusDays((90 * (it + 1)).toLong())
+                }
+                .mapAsync {
+                    Database.filings.find(and(
+                        Filing::dateFiled gt it.first,
+                        Filing::dateFiled lt it.second))
+                }
+                .awaitAll()
+                .flatMap { it.toList() }
+        }
+
+        println(filings.size)
+    }
+
+    println(ms)
 }
 
 fun dump10KReportsToCSVRowPerFiling() {
