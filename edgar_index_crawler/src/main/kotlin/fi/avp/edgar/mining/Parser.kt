@@ -18,18 +18,6 @@ import java.time.LocalDateTime
 import java.util.concurrent.Executors
 import kotlin.system.measureTimeMillis
 
-data class ReportRecord(
-    val cik: String,
-    val name: String,
-    @BsonId val _id: String,
-    val type: String,
-    val date: LocalDate,
-    val dataUrl: String,
-    val reportFileName: String,
-    val relatedContexts: List<Context> = emptyList(),
-    val extracts: Map<String, String>
-)
-
 private val taskDispatcher: CoroutineDispatcher = Executors.newFixedThreadPool(16).asCoroutineDispatcher()
 
 @SpringBootApplication(scanBasePackages = ["fi.avp.edgar.mining"])
@@ -40,18 +28,15 @@ open class LargeCapParser {
     open fun commandLineRunner(ctx: ApplicationContext): CommandLineRunner? {
         return CommandLineRunner { args ->
             runBlocking {
-//                parseLargeCapReports()
-
                 val latestFilings = Database.getLatestFilings(6)
                 latestFilings.map {
                     scrapeFilingFacts(it)
                 }.forEach {
-                    Database.filings.updateOne(it)
+                    Database.filings.updateOne(Filing::dataUrl eq it.dataUrl, it)
                 }
             }
         }
     }
-
 }
 
 suspend fun scrapeFilingFacts(filing: Filing): Filing = coroutineScope {
@@ -84,14 +69,18 @@ suspend fun scrapeFilingFacts(filing: Filing): Filing = coroutineScope {
     }
 
     val actualFiling = async { collectFilingData(filing) }
-    val annualReportId = async { if (filing.formType != "10-Q") null else getClosestAnnualReport(filing)?._id }
+    val annualReportTask = async { if (filing.formType != "10-Q") null else getClosestAnnualReport(filing) }
     val previousYearFiling = async { getPreviousYearFiling(filing) }
 
     val withYearToYear = previousYearFiling.await()?. let {
         resolveYearToYearChanges(actualFiling.await(), it)
     } ?: actualFiling.await()
 
-    withYearToYear.copy(closestYearReportId = annualReportId.await())
+    val annualReport = annualReportTask.await()
+    withYearToYear.copy(
+        closestYearReportId = annualReport?._id,
+        latestRevenue = annualReport?.revenue?.value,
+        yearToYearUpdate = OperationStatus.DONE)
 }
 
 fun main(args: Array<String>) {
@@ -132,7 +121,7 @@ suspend fun resolveYearToYearChanges(actualFiling: Filing, previousYearFiling: F
 suspend fun collectFilingData(filing: Filing): Filing {
     val filingWithFiles = filing.copy(files = fetchRelevantFileNames(filing))
 
-    return if (filing.extractedData == null) {
+    return if (filing.extractedData?.isEmpty() != false) {
         delay(5000)
         fetchXBRLData(filingWithFiles).xbrl?.let {
             val filing = parseFiling(it.byteInputStream(StandardCharsets.UTF_8), filingWithFiles)

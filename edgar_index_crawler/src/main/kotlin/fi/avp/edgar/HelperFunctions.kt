@@ -1,22 +1,23 @@
 package fi.avp.edgar
 
+import com.mongodb.BasicDBObject
 import fi.avp.edgar.mining.*
 import fi.avp.util.mapAsync
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
+import org.bson.Document
 import org.litote.kmongo.*
-import org.springframework.boot.CommandLineRunner
-import org.springframework.boot.autoconfigure.SpringBootApplication
-import org.springframework.boot.runApplication
-import org.springframework.context.ApplicationContext
-import org.springframework.context.annotation.Bean
+import org.litote.kmongo.coroutine.*
 import java.nio.file.Paths
 import java.time.LocalDate
 import java.util.concurrent.Executors
 import kotlin.system.measureTimeMillis
 
+
+@Serializable
 data class CompanyInfo(
     val _id: String? = null,
     val primaryTicker: String,
@@ -28,26 +29,11 @@ data class CompanyInfo(
     val exchange: String = "",
     val sic: Int = -1)
 
+@Serializable
 data class SecCompanyRecord(
     val cik_str: Int,
     val title: String,
     val ticker: String)
-
-@SpringBootApplication
-open class HelperApplication {
-
-    @Bean
-    open fun helper(ctx: ApplicationContext): CommandLineRunner? {
-        return CommandLineRunner { args ->
-            resolveAnnualReportReferences()
-        }
-    }
-
-}
-
-fun main(args: Array<String>) {
-    runApplication<HelperApplication>(*args)
-}
 
 /**
  * Take the data from sec (json file extract) and company info from internet.
@@ -55,7 +41,7 @@ fun main(args: Array<String>) {
  * The algorithms collects all the records that have the same sic number or the same
  * ticker and aggregates them into a single record.
  */
-fun consolidateCompanyInfo() {
+suspend fun consolidateCompanyInfo() {
     val secTickerDatabase = Database.database.getCollection<SecCompanyRecord>("sec-ticker-database")
         .find()
         .toList()
@@ -87,7 +73,7 @@ fun consolidateCompanyInfo() {
 
     }.values.toMutableList()
 
-    val companyInfoDatabase = Database.database.getCollection("company-info").find().toList()
+    val companyInfoDatabase = Database.database.getCollection<Document>("company-info").find().toList()
 
     val withAdditionalInformation = companyInfoDatabase.map { info ->
         val ticker = info.get("ticker").toString()
@@ -148,15 +134,15 @@ fun consolidateCompanyInfo() {
     }
 }
 
-fun moveSP500Reports() {
+suspend fun moveSP500Reports() {
     val tickers = Database.getSP500Tickers()
-    val sp500 = Database.database.getCollection("sp500", Filing::class.java)
+    val sp500 = Database.database.getCollection<Filing>("sp500")
     Database.filings.find().toList().filter { it.ticker in tickers }.forEach {
         sp500.save(it)
     }
 }
 
-fun findReportsWithMultipleEPS() {
+suspend fun findReportsWithMultipleEPS() {
     val reports = Database.database.getCollection<Filing>("sp500")
     val allReports = reports
         .find()
@@ -176,7 +162,7 @@ fun main() {
 //    dump10KReportsToCSVRowPerFiling()
 //    fixDecimalsInSP500AnnualReports()
 //    consolidateCompanyInfo()
-    resolveAnnualReportReferences()
+    resolveAnnualReportReferencesSince()
 }
 
 val years = 2011..2019
@@ -190,7 +176,7 @@ val metrics = mapOf(
     "operatingCashFlow" to Filing::operatingCashFlow,
     "liabilities" to Filing::liabilities)
 
-fun extractMetrics(update: (Filing) -> Filing) {
+suspend fun extractMetrics(update: (Filing) -> Filing) {
     val reports = Database.database.getCollection<Filing>("sp500")
     val allReports = reports
         .find("{formType: '10-K'}")
@@ -209,32 +195,48 @@ fun extractMetrics(update: (Filing) -> Filing) {
     }
 }
 
-fun resolveAnnualReportReferences() {
-    //
+suspend fun getClosestAnnualReportId(filing: Filing): String? {
+    val date = filing.dateFiled!!
+    val sortCriteria = BasicDBObject("dateFiled", -1)
+    return Database.filings
+        .find(and(Filing::dateFiled lt date, Filing::formType eq "10-K"))
+        .sort(sortCriteria)
+        .first()
+        ?._id
+}
 
+fun resolveAnnualReportReferencesSince() {
     val ms = measureTimeMillis {
-        val startDate = LocalDate.of(2009 , 12, 31)
-        val filings = runBlocking {
-            (0..44)
-                .map {
-                     startDate.plusDays((90 * it).toLong()) to startDate.plusDays((90 * (it + 1)).toLong())
-                }
+        val startDate = LocalDate.of(2017 , 12, 31)
+        runBlocking {
+            (0..3)
+                .map { startDate.plusDays((365 * it).toLong()) to startDate.plusDays((365 * (it + 1)).toLong()) }
                 .mapAsync {
+                    println("looking between ${it.first} and ${it.second}")
                     Database.filings.find(and(
                         Filing::dateFiled gt it.first,
                         Filing::dateFiled lt it.second))
                 }
                 .awaitAll()
                 .flatMap { it.toList() }
+                .chunked(100).forEach {
+                    it.mapAsync {
+                        if (it.formType == "10-K") {
+                            it.copy(closestYearReportId = it._id)
+                        } else {
+                            it.copy(closestYearReportId = getClosestAnnualReportId(it))
+                        }
+                    }.awaitAll().toList().forEach {
+                        Database.filings.updateOne(Filing::dataUrl eq it.dataUrl, it)
+                    }
+                }
         }
-
-        println(filings.size)
     }
 
     println(ms)
 }
 
-fun dump10KReportsToCSVRowPerFiling() {
+suspend fun dump10KReportsToCSVRowPerFiling() {
     val file = Paths.get("/Users/sasha/temp/10-k-filings.csv").toFile()
     val cols = listOf("ticker", "date").plus(metrics.keys).plus("dataUrl")
     val buffer = StringBuilder()
@@ -261,7 +263,7 @@ fun dump10KReportsToCSVRowPerFiling() {
     file.writeText(buffer.toString())
 }
 
-private fun dump10KReportsToCSVRowPerCompany() {
+private suspend fun dump10KReportsToCSVRowPerCompany() {
     val file = Paths.get("/Users/sasha/temp/sample.csv").toFile()
 
     val buffer = StringBuilder()
@@ -294,7 +296,7 @@ fun getByFiscalYear(reports: List<Filing>): Map<Int, Filing> {
     return reports.groupBy { it.fiscalYear?.toInt() ?: -1 }.filterKeys { it > 0 }.mapValues { it.value.first() }
 }
 
-fun fixDecimalsInSP500AnnualReports() {
+suspend fun fixDecimalsInSP500AnnualReports() {
     val sP500Companies = Database.getSP500Companies()
     sP500Companies.forEach {
         val filing = it.cik.flatMap {

@@ -26,11 +26,9 @@ class ReportTest {
     }
 
     @Test
-    fun resolveYearToYearChangesForLatestAppleFiling() {
+    fun resolveYearToYearChangesForLatestAppleFiling() = runBlocking {
         val latestFiling = Database.getFilingsByTicker("AAPL").maxBy { it.dateFiled!! }
-        val updated = runBlocking {
-            scrapeFilingFacts(latestFiling!!)
-        }
+        val updated = scrapeFilingFacts(latestFiling!!)
     }
 
     @Test
@@ -122,9 +120,11 @@ class ReportTest {
     fun mapCompanyReportRecordsToData() {
         val dataStream = getCompanyReports("AAPL")
         val appleRefs =
-            Database.getFilingsByTicker("AAPL").map {
-                it to dataStream.get("${it.reference}.xml")
-            }.toMap()
+            runBlocking {
+                Database.getFilingsByTicker("AAPL").map {
+                    it to dataStream.get("${it.reference}.xml")
+                }.toMap()
+            }
         assertTrue { appleRefs.isNotEmpty() }
     }
 
@@ -136,8 +136,8 @@ class ReportTest {
 
     @Test
     fun getPreviousYearQuarterFiling() {
-        Database.filings.find(Filing::_id eq "5f29a0eafaaf3c66cf17b177").first()?.let {
-            runBlocking {
+        runBlocking {
+            Database.filings.find(Filing::_id eq "5f29a0eafaaf3c66cf17b177").first()?.let {
                 scrapeFilingFacts(it)?.let {
                     println(it)
                 }
@@ -162,9 +162,10 @@ class ReportTest {
 
     @Test
     fun getTickers() {
-        assertTrue { Database.getTickers().contains("AAPL") }
-        assertTrue { Database.getSP500Tickers().contains("AAPL") }
+        assertTrue { runBlocking { Database.getTickers().contains("AAPL") } }
+        assertTrue { runBlocking { Database.getSP500Tickers().contains("AAPL") } }
     }
+
 
     private fun reportDataExtractionResult(fileName: String, year: Int, month: Int, day: Int): ReportDataExtractionResult {
         val file = File("src/test/resources/${fileName}")

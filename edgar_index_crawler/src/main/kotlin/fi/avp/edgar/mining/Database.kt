@@ -1,39 +1,44 @@
 package fi.avp.edgar.mining
 
 import com.mongodb.BasicDBObject
+import com.mongodb.DBObject
 import fi.avp.edgar.CompanyInfo
-import org.litote.kmongo.*
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.ContextualSerialization
+import kotlinx.serialization.Serializable
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import org.litote.kmongo.coroutine.*
+import org.litote.kmongo.gt
+import org.litote.kmongo.reactivestreams.KMongo
 
 object Database {
 
-    private val client = KMongo.createClient() //get com.mongodb.MongoClient new instance
+    private val asyncClient = KMongo.createClient().coroutine
 
-    val database = client.getDatabase("sec-report") //normal java driver usage
-    val reports = database.getCollection("reports", ReportRecord::class.java)
-    val filings = database.getCollection("report-index", Filing::class.java)
-    val xbrl = database.getCollection("xbrl", XBRL::class.java)
-    val sp500 = database.getCollection("s-and-p-500")
+    val database = asyncClient.getDatabase("sec-report") //normal java driver usage
+    val filings = database.getCollection<Filing>("report-index")
+    val sp500 = database.getCollection<DBObject>("s-and-p-500")
 
-    val companyList = database.getCollection<CompanyInfo>("company-list")
+    val companyList = runBlocking {  database.getCollection<CompanyInfo>("company-list")
         .find()
         .batchSize(2000)
         .toList()
+    }
 
     fun getSP500Companies(): List<CompanyInfo> {
         return companyList.filter { it.isInSP500 }
     }
 
-    fun getSP500Tickers(): List<String> {
-        return sp500.distinct("ticker", String::class.java).toList()
+    suspend fun getSP500Tickers(): List<String> {
+        return sp500.distinct<String>("ticker", "{}").toList()
     }
 
-    fun getTickers(): List<String> {
-        return filings.distinct("ticker", String::class.java).toList()
+    suspend fun getTickers(): List<String> {
+        return filings.distinct<String>("ticker", "{}").toList()
     }
 
-    fun getFilingsByCik(cik: String): List<Filing> {
+    suspend fun getFilingsByCik(cik: String): List<Filing> {
         return try {
             filings.find("{cik: '$cik'}").toList()
         } catch (e: Exception) {
@@ -41,11 +46,11 @@ object Database {
         }
     }
 
-    fun getFilingsByTicker(ticker: String): List<Filing> {
+    suspend fun getFilingsByTicker(ticker: String): List<Filing> {
         return filings.find("{ticker: '$ticker'}").toList()
     }
 
-    fun getLatestFilings(days: Int): List<Filing> {
+    suspend fun getLatestFilings(days: Int): List<Filing> {
         val sortCriteria = BasicDBObject("dateFiled", -1)
         return filings
             .find(Filing::dateFiled gt LocalDate.now().minusDays(days.toLong()))
@@ -53,7 +58,7 @@ object Database {
             .toList()
     }
 
-    fun tryResolveExisting(stub: Filing): Filing {
+    suspend fun tryResolveExisting(stub: Filing): Filing {
         return filings.findOne("{dataUrl: '${stub.dataUrl}'}") ?: stub
     }
 }
@@ -89,14 +94,17 @@ enum class OperationStatus {
     PENDING
 }
 
+@Serializable
 data class Filing(
     var _id: String? = null,
     val cik: String?,
+    @ContextualSerialization
     val dateFiled: LocalDate?,
     val fileName: String? = null,
     val companyName: String?,
     val formType: String?,
     val revenue: Metric? = null,
+    @ContextualSerialization
     val netIncome: Metric? = null,
     val investingCashFlow: Metric? = null,
     val operatingCashFlow: Metric? = null,
@@ -116,6 +124,7 @@ data class Filing(
     var reference: String? = null, // last segment of data URL
     val files: ReportFiles? = null,
     val closestYearReportId: String? = null,
+    val latestRevenue: Double? = null,
     val dataExtractionStatus: OperationStatus? = OperationStatus.PENDING,
     val yearToYearUpdate: OperationStatus? = OperationStatus.PENDING) {
 
@@ -125,7 +134,6 @@ data class Filing(
                 dataUrl = "$EDGAR_DATA${cik}/${it.replace("-", "")}"
             }
             reference = dataUrl?.substringAfterLast("/")
-//            _id = reference
         }
     }
 }

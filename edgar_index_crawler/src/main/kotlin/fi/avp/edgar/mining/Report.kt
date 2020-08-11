@@ -5,13 +5,18 @@ import fi.avp.edgar.data.attrNames
 import fi.avp.util.attr
 import fi.avp.util.find
 import fi.avp.util.list
+import kotlinx.serialization.*
+import kotlinx.serialization.internal.StringDescriptor
 import org.w3c.dom.Document
 import org.w3c.dom.Node
 import org.w3c.dom.NodeList
 import java.io.InputStream
+import java.text.DateFormat
+import java.text.SimpleDateFormat
 import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
 import javax.xml.parsers.DocumentBuilderFactory
 import javax.xml.xpath.XPath
@@ -25,6 +30,7 @@ data class ReportDataExtractionResult(
     val problems: ReportProblems
 )
 
+@Serializable
 data class ReportProblems(val suspiciousContexts: Set<String>, val missingProperties: Set<PropertyDescriptor>) {
     override fun toString(): String {
         val ctx = suspiciousContexts.map { "$it" }.joinToString()
@@ -33,6 +39,7 @@ data class ReportProblems(val suspiciousContexts: Set<String>, val missingProper
     }
 }
 
+@Serializable
 data class PropertyData(
     val descriptor: PropertyDescriptor,
     val extractedValues: List<ExtractedValue>,
@@ -40,6 +47,7 @@ data class PropertyData(
     val valueUnits: Set<ValueUnit>?
 )
 
+@Serializable
 data class ExtractedValue (
     val propertyId: String,
     val value: String,
@@ -77,16 +85,37 @@ fun parseValue(value: String, decimals: Double): Double {
     }
 }
 
+@Serializable
 data class ValueUnit(
     val id: String,
     val measure: String?,
     val divide: Pair<String, String>?)
 
-data class Period(val startDate: LocalDate, val endDate: LocalDate, val isInstant: Boolean = false) {
+@Serializable
+data class Period(
+    @ContextualSerialization val startDate: LocalDate,
+    @ContextualSerialization val endDate: LocalDate, val isInstant: Boolean = false) {
     val duration: Long
         get() = Duration.between(startDate.atStartOfDay(), endDate.atStartOfDay()).toDays()
 }
 
+@Serializer(forClass = LocalDate::class)
+object DateSerializer: KSerializer<LocalDate> {
+    private val df = DateTimeFormatter.ofPattern("MM/dd/yyyy hh:mm:ss a")
+
+    override val descriptor: SerialDescriptor =
+        PrimitiveDescriptor("WithCustomDefault", PrimitiveKind.STRING)
+
+    override fun serialize(encoder: Encoder, obj: LocalDate) {
+        encoder.encodeString(df.format(obj))
+    }
+
+    override fun deserialize(decoder: Decoder): LocalDate {
+        return LocalDate.from(df.parse(decoder.decodeString()))
+    }
+}
+
+@Serializable
 data class Context(val id: String, val period: Period?, val segment: String? = null)
 
 open class Report(val content: InputStream, private val reportType: String, private val isInline: Boolean) {

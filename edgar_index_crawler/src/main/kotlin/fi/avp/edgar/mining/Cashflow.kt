@@ -1,6 +1,7 @@
 package fi.avp.edgar.mining
 
 import fi.avp.edgar.CompanyInfo
+import kotlinx.coroutines.runBlocking
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 import org.w3c.dom.Document
@@ -13,12 +14,17 @@ import javax.xml.xpath.XPathFactory
 import kotlin.system.measureTimeMillis
 
 val propertyPattern = Regex(".*_(.+),")
+
 fun main() {
     Database.getSP500Companies().forEach {
         val companyInfo = it
         val doneIn = measureTimeMillis {
             val filings =
-                it.cik.flatMap { Database.getFilingsByCik(it.toString()) }.filter { it.formType == "10-K" }
+                it.cik.flatMap {
+                    runBlocking {
+                        Database.getFilingsByCik(it.toString())
+                    }
+                }.filter { it.formType == "10-K" }
 
             val reportData = getCompanyReports(it.primaryTicker)
 

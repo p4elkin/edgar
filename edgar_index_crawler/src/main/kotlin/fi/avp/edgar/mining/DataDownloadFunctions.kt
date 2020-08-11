@@ -6,8 +6,10 @@ import com.github.michaelbull.retry.policy.plus
 import com.github.michaelbull.retry.retry
 import fi.avp.util.*
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.Serializable
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.FileOutputStream
@@ -17,6 +19,7 @@ import java.nio.file.Paths
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
+@Serializable
 data class ReportFiles(
     val visualReport: String?,
     val xbrlReport: String?,
@@ -67,8 +70,8 @@ suspend fun fetchRelevantFileNames(filing: Filing): ReportFiles = retry(limitAtt
     }
 }
 
-fun downloadXBRL() {
-    Database.getSP500Companies().filter { it.tickers.contains("INTC") }.forEach {
+suspend fun downloadXBRL() {
+    Database.getSP500Companies().forEach {
         if (!Files.exists(Paths.get("${Locations.reports}/${it.primaryTicker}.zip"))) {
             val primaryTicker = it.primaryTicker
             println("Downloading $primaryTicker")
@@ -79,25 +82,23 @@ fun downloadXBRL() {
     }
 }
 
-fun downloadReports(ticker: String, refs: List<Filing>) {
+suspend fun downloadReports(ticker: String, refs: List<Filing>) = coroutineScope {
     println("Downloading ${ticker}")
-            runBlocking {
-                val downloadedStuff = refs
-                    .sortedByDescending { it.dateFiled }
-                    .filter { it.files != null }
-                    .distinctBy { it.files!!.xbrlReport }
-                    .mapAsync { filing ->
-                        nullOnFailure(errorMessage = {"Failed to download XBRL data for ${filing.dataUrl} due to ${it.message}"}) {
-                            fetchXBRLData(filing)
-                        }
-                    }
-                    .awaitAll()
-
-                if (downloadedStuff.isNotEmpty()) {
-                    saveZippedReports(ticker, downloadedStuff.filterNotNull())
-                    delay(1000)
-                }
+    val downloadedStuff = refs
+        .sortedByDescending { it.dateFiled }
+        .filter { it.files != null }
+        .distinctBy { it.files!!.xbrlReport }
+        .mapAsync { filing ->
+            nullOnFailure(errorMessage = {"Failed to download XBRL data for ${filing.dataUrl} due to ${it.message}"}) {
+                fetchXBRLData(filing)
             }
+        }
+        .awaitAll()
+
+    if (downloadedStuff.isNotEmpty()) {
+        saveZippedReports(ticker, downloadedStuff.filterNotNull())
+        delay(1000)
+    }
 }
 
 suspend fun fetchXBRLData(filing: Filing): XBRL = retry(limitAttempts(3) + constantDelay(5000)) {
@@ -192,5 +193,7 @@ fun createZipEntry(reportFileName: String, prefix: String, data: String?, out: Z
 }
 
 fun main() {
-    downloadXBRL()
+    runBlocking {
+        downloadXBRL()
+    }
 }

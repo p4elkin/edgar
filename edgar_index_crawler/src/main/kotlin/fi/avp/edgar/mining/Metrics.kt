@@ -1,7 +1,9 @@
 package fi.avp.edgar.mining
 
+import kotlinx.serialization.Serializable
 import kotlin.math.ceil
 
+@Serializable
 data class Metric(
     val value: Double? = 0.0,
     val unit: String?,

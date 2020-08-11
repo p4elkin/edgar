@@ -1,8 +1,10 @@
 package fi.avp.edgar.data
 
 import fi.avp.edgar.mining.EDGAR_DATA
+import kotlinx.serialization.Serializable
 import java.time.LocalDateTime
 
+@Serializable
 data class PropertyDescriptor(
     val variants: List<String>,
     val id: String = "",

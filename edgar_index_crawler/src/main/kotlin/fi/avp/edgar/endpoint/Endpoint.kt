@@ -130,8 +130,13 @@ class CurrentIndexCrawler {
     @RestController
     open class Endpoint() {
 
-        private val filings = Database.filings.find(Filing::dateFiled gt LocalDate.now().minusDays(2000)).toList()
-        private val cache = Database.filings.find(Filing::dateFiled gt LocalDate.now().minusDays(1000)).toList()
+        private val filings = runBlocking {
+            Database.filings.find(Filing::dateFiled gt LocalDate.now().minusDays(2000)).toList()
+        }
+
+        private val cache = runBlocking {
+            Database.filings.find(Filing::dateFiled gt LocalDate.now().minusDays(1000)).toList()
+        }
 
         @GetMapping(value = ["/filingCount"], produces = [])
         fun countFilings(@RequestParam dayOffset: Int, @RequestParam revenueThreshold: Int): Int {
