@@ -1,6 +1,14 @@
 import React, {useEffect, useState} from "react";
 import _ from "lodash";
 
+const toPercents = (value) => {
+    if (value === "NaN") {
+        return "-"
+    }
+
+    return parseFloat(((parseFloat(value) - 1) * 100).toFixed(2))
+};
+
 export const FilingCard = () => {
     const [filings, setFilings] = useState([])
 
@@ -14,19 +22,16 @@ export const FilingCard = () => {
         loadFilings()
     }, []);
 
-    const groupedByDate = _.groupBy(filings, 'date');
-    return <>{groupedByDate.map((date, filings) => (
-        <div>
-            {filings.map(filing =>
-                <div style={{margin: '5px'}}>
-                    <span style={{display: 'inline-block', width: '500px'}}>
+    return <>{
+            filings.map(filing => (
+                <div key={filing.ticker}>
+                    <span style={{display: 'inline-block', width: '400px'}}>
                         <b style={{paddingRight: '10px'}}>{filing.name}</b>
                         <span>({filing.type})</span>
+                        <span>({toPercents(filing.epsYY)})%</span>
                     </span>
                     <a href={filing.interactiveData}>interactive data</a>
                 </div>
-            )}
-        </div>
-        ))
+            ))
     }</>
 }
