@@ -30,14 +30,14 @@ fun main() {
 }
 
 private fun extractCashflowReconciliationData(filing: Filing, companyInfo: CompanyInfo, reportData: Map<String, InputStream>) {
-    val cashFlowStatment = filing.reportFiles?.cashFlow
+    val cashFlowStatment = filing.files?.cashFlow
     if (cashFlowStatment == null) {
         println("${companyInfo.primaryTicker} ${filing.dateFiled} ${filing.dataUrl}")
     }
 
     cashFlowStatment?.let {
         try {
-            val cashflowFileName = "cashflow-${filing.reportFiles!!.xbrlReport!!}"
+            val cashflowFileName = "cashflow-${filing.files!!.xbrlReport!!}"
             val content = reportData[cashflowFileName]
             content?.let {
                 val xml = BufferedReader(it.reader(StandardCharsets.UTF_8))

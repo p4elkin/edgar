@@ -29,7 +29,7 @@ class ReportTest {
     fun resolveYearToYearChangesForLatestAppleFiling() {
         val latestFiling = Database.getFilingsByTicker("AAPL").maxBy { it.dateFiled!! }
         val updated = runBlocking {
-            resolveYearToYearChanges(latestFiling!!)
+            scrapeFilingFacts(latestFiling!!)
         }
     }
 
@@ -138,7 +138,7 @@ class ReportTest {
     fun getPreviousYearQuarterFiling() {
         Database.filings.find(Filing::_id eq "5f29a0eafaaf3c66cf17b177").first()?.let {
             runBlocking {
-                getPreviousYearFiling(it)?.let {
+                scrapeFilingFacts(it)?.let {
                     println(it)
                 }
             }

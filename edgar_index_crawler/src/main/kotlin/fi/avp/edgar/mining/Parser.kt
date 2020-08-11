@@ -44,7 +44,7 @@ open class LargeCapParser {
 
                 val latestFilings = Database.getLatestFilings(6)
                 latestFilings.map {
-                    resolveYearToYearChanges(it)
+                    scrapeFilingFacts(it)
                 }.forEach {
                     Database.filings.updateOne(it)
                 }
@@ -54,15 +54,53 @@ open class LargeCapParser {
 
 }
 
+suspend fun scrapeFilingFacts(filing: Filing): Filing = coroutineScope {
+
+    if (filing.dataExtractionStatus == OperationStatus.FAILED) {
+        println("Skipping previously failed to be parsed filing ${filing.dataUrl}")
+        return@coroutineScope filing
+    }
+
+    suspend fun getPreviousYearFiling(filing: Filing): Filing? {
+        val date = filing.dateFiled!!
+        val sortCriteria = BasicDBObject("dateFiled", -1)
+        return Database.filings
+            .find(and(Filing::dateFiled lt date.minusDays(300), Filing::cik eq filing.cik))
+            .sort(sortCriteria)
+            .first()?.let {
+                collectFilingData(it)
+            }
+    }
+
+    suspend fun getClosestAnnualReport(filing: Filing): Filing? {
+        val date = filing.dateFiled!!
+        val sortCriteria = BasicDBObject("dateFiled", -1)
+        return Database.filings
+            .find(and(Filing::dateFiled lt date, Filing::formType eq "10-K"))
+            .sort(sortCriteria)
+            .first()?.let {
+                collectFilingData(it)
+            }
+    }
+
+    val actualFiling = async { collectFilingData(filing) }
+    val annualReportId = async { if (filing.formType != "10-Q") null else getClosestAnnualReport(filing)?._id }
+    val previousYearFiling = async { getPreviousYearFiling(filing) }
+
+    val withYearToYear = previousYearFiling.await()?. let {
+        resolveYearToYearChanges(actualFiling.await(), it)
+    } ?: actualFiling.await()
+
+    withYearToYear.copy(closestYearReportId = annualReportId.await())
+}
+
 fun main(args: Array<String>) {
     runApplication<LargeCapParser>(*args)
 }
 
-suspend fun resolveYearToYearChanges(filing: Filing): Filing = coroutineScope {
-    val actualFiling = async { collectFilingData(filing) }
-    val previousYearFiling = getPreviousYearFiling(filing)
+suspend fun resolveYearToYearChanges(actualFiling: Filing, previousYearFiling: Filing): Filing = coroutineScope {
 
-    val dataWithDeltas = actualFiling.await().extractedData?.let {
+    val dataWithDeltas = actualFiling.extractedData?.let {
         it.map { value ->
             val previousYearValue = previousYearFiling?.extractedData?.findLast { it.propertyId == value.propertyId }
             val delta = previousYearValue?.let {
@@ -72,7 +110,7 @@ suspend fun resolveYearToYearChanges(filing: Filing): Filing = coroutineScope {
         }
     }
 
-    actualFiling.await().let {
+    actualFiling.let {
         it.copy(
             eps = it.eps?.calculateYearToYear(previousYearFiling?.eps),
             extractedData = dataWithDeltas,
@@ -87,32 +125,22 @@ suspend fun resolveYearToYearChanges(filing: Filing): Filing = coroutineScope {
     }
 }
 
-suspend fun getPreviousYearFiling(filing: Filing): Filing? {
-    val date = filing.dateFiled!!
-    val sortCriteria = BasicDBObject("dateFiled", -1)
-    return Database.filings
-        .find(and(Filing::dateFiled lt date.minusDays(300), Filing::cik eq filing.cik))
-        .sort(sortCriteria)
-        .first()?.let {
-            collectFilingData(it)
-        }
-}
 
 /**
  * Collect and save if needed
  */
 suspend fun collectFilingData(filing: Filing): Filing {
-    return if (filing.processed) {
-        filing
-    } else {
-        val filingWithFiles = filing.copy(reportFiles = fetchRelevantFileNames(filing))
-        delay(5000)
+    val filingWithFiles = filing.copy(files = fetchRelevantFileNames(filing))
 
-        downloadSingleReport(filingWithFiles)?.xbrl?.let {
+    return if (filing.extractedData == null) {
+        delay(5000)
+        fetchXBRLData(filingWithFiles).xbrl?.let {
             val filing = parseFiling(it.byteInputStream(StandardCharsets.UTF_8), filingWithFiles)
             Database.filings.save(filing)
             filing
         } ?: filingWithFiles
+    } else {
+        filingWithFiles
     }
 }
 
@@ -120,18 +148,15 @@ private suspend fun parseLargeCapReports() {
     val sP500Companies = Database.getSP500Companies()
     sP500Companies.forEach {
         val doneIn = measureTimeMillis {
-            val filings = it.cik.flatMap {
-                Database.getFilingsByCik(
-                    it.toString()
-                )
-            }.filter { it.formType == "10-K" }
+            val filings = it.cik
+                .flatMap { Database.getFilingsByCik(it.toString()) }
+                .filter { it.formType == "10-K" }
 
             println("Parsing data of ${it.tickers} (${filings.size} files)")
 
             val reportData = getCompanyReports(it.primaryTicker)
             val parsedReports = withContext(taskDispatcher) {
                 parseReports(filings, reportData)
-
             }
 
             println("saving ${filings.size} reports")
@@ -147,7 +172,7 @@ suspend fun parseReports(filings: List<Filing>, reportData: Map<String, InputStr
     return filings
         .mapAsync { filing ->
             println("resolving ${filing.dataUrl}")
-            val data = filing.reportFiles?.xbrlReport?.let { reportData[it] }
+            val data = filing.files?.xbrlReport?.let { reportData[it] }
             if (data == null) {
                 println("missing report data for: ${filing.reference}")
                 filing
@@ -158,11 +183,11 @@ suspend fun parseReports(filings: List<Filing>, reportData: Map<String, InputStr
 }
 
 fun parseFiling(data: InputStream?, filing: Filing): Filing {
-    println("Parsing data of ${filing.ticker} ${filing?.reportFiles?.xbrlReport}")
+    println("Parsing data of ${filing.ticker} ${filing?.files?.xbrlReport}")
     return data?.use {
         try {
             val date = filing.dateFiled?.atStartOfDay()!!
-            val isInline = filing.reportFiles!!.xbrlReport!!.endsWith(".htm")
+            val isInline = filing.files!!.xbrlReport!!.endsWith(".htm")
 
             val parsedProps = parseProps(
                 data,
@@ -186,6 +211,7 @@ fun parseFiling(data: InputStream?, filing: Filing): Filing {
 
             withExtractedData.copy(
                 processed = true,
+                dataExtractionStatus = OperationStatus.DONE,
                 assets = Assets.get(withExtractedData),
                 revenue = Revenue.get(withExtractedData),
                 eps = Eps.get(withExtractedData),
@@ -197,11 +223,10 @@ fun parseFiling(data: InputStream?, filing: Filing): Filing {
                 fiscalYear = FiscalYearExtractor.get(withExtractedData)?.toLong()
             )
         } catch (e: Exception) {
-            println("failed to parse report from ${filing.reportFiles!!.xbrlReport!!}.xml (${filing.dataUrl})")
+            println("failed to parse report from ${filing.files!!.xbrlReport!!}.xml (${filing.dataUrl})")
             e.printStackTrace()
-            filing.copy(processed = false)
+            filing.copy(processed = false, dataExtractionStatus = OperationStatus.FAILED)
         }
-
     } ?: filing
 }
 

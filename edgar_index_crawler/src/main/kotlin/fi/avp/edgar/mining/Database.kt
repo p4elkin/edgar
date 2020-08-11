@@ -2,10 +2,7 @@ package fi.avp.edgar.mining
 
 import com.mongodb.BasicDBObject
 import fi.avp.edgar.CompanyInfo
-import org.litote.kmongo.KMongo
-import org.litote.kmongo.find
-import org.litote.kmongo.getCollection
-import org.litote.kmongo.gt
+import org.litote.kmongo.*
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
@@ -55,6 +52,10 @@ object Database {
             .sort(sortCriteria)
             .toList()
     }
+
+    fun tryResolveExisting(stub: Filing): Filing {
+        return filings.findOne("{dataUrl: '${stub.dataUrl}'}") ?: stub
+    }
 }
 
 data class XBRL(val reportFileName: String, val xbrl: String?, val cashFlow: String?, val balanceSheet: String?, val incomeStatement: String?)
@@ -82,6 +83,12 @@ fun resolveFilingInfoFromIndexRecord(indexRecord: String): Filing? {
     }
 }
 
+enum class OperationStatus {
+    DONE,
+    FAILED,
+    PENDING
+}
+
 data class Filing(
     var _id: String? = null,
     val cik: String?,
@@ -107,7 +114,10 @@ data class Filing(
     val units: Set<ValueUnit>? = emptySet(),
     val extractedData: List<ExtractedValue>? = emptyList(),
     var reference: String? = null, // last segment of data URL
-    val reportFiles: ReportFiles? = null) {
+    val files: ReportFiles? = null,
+    val closestYearReportId: String? = null,
+    val dataExtractionStatus: OperationStatus? = OperationStatus.PENDING,
+    val yearToYearUpdate: OperationStatus? = OperationStatus.PENDING) {
 
     init {
         fileName?.let {

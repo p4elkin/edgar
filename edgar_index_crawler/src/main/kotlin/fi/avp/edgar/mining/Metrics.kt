@@ -22,6 +22,18 @@ data class Metric(
     }
 }
 
+fun valueInMillions(metric: Metric?): Double {
+    return metric?.value?.let {
+        val millions = (it / 1000_000.0)
+        if (millions < 1) {
+            millions
+        } else {
+            ceil(millions * 100) / 100
+        }
+    } ?: Double.NaN
+}
+
+
 open class NumberExtractor(val variants: Set<String>) {
 
     fun get(report: Filing): Double? {

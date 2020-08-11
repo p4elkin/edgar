@@ -50,6 +50,11 @@
             <version>1.13.1</version>
         </dependency>
         <dependency>
+            <groupId>com.michael-bull.kotlin-retry</groupId>
+            <artifactId>kotlin-retry</artifactId>
+            <version>1.0.5</version>
+        </dependency>
+        <dependency>
             <groupId>it.skrape</groupId>
             <artifactId>skrapeit-core</artifactId>
             <version>1.0.0-alpha6</version>

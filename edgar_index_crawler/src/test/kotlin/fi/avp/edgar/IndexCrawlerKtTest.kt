@@ -28,11 +28,11 @@ class IndexCrawlerKtTest {
 
             filings.chunked(5).forEach {
                 it.mapAsync {
-                    val filingRef = it.copy(reportFiles = fetchRelevantFileNames(
+                    val filingRef = it.copy(files = fetchRelevantFileNames(
                         it
                     )
                     )
-                    downloadSingleReport(filingRef)?.xbrl?.let {
+                    fetchXBRLData(filingRef)?.xbrl?.let {
                         parseFiling(
                             it.byteInputStream(StandardCharsets.UTF_8),
                             filingRef

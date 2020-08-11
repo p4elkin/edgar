@@ -1,5 +1,9 @@
 package fi.avp.edgar.mining
 
+import com.github.michaelbull.retry.policy.constantDelay
+import com.github.michaelbull.retry.policy.limitAttempts
+import com.github.michaelbull.retry.policy.plus
+import com.github.michaelbull.retry.retry
 import fi.avp.util.*
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
@@ -23,40 +27,44 @@ data class ReportFiles(
     val financialSummary: String?)
 
 private val xmlXBRLReportPattern = Regex("(.*)_cal.xml")
-suspend fun fetchRelevantFileNames(filing: Filing): ReportFiles {
-    val reportBaseUrl = filing.dataUrl
-    val index = asyncJson("$reportBaseUrl/index.json")
+suspend fun fetchRelevantFileNames(filing: Filing): ReportFiles = retry(limitAttempts(5)) {
+    if (filing.files == null) {
+        val reportBaseUrl = filing.dataUrl
+        val index = asyncJson("$reportBaseUrl/index.json")
 
-    val reportNode = index["directory"]["item"]
-        .filter { it.text("name").endsWith(".htm") }
-        .filter { (!it.text("name").contains("ex")) }
-        .maxBy { it.long("size") }
+        val reportNode = index["directory"]["item"]
+            .filter { it.text("name").endsWith(".htm") }
+            .filter { (!it.text("name").contains("ex")) }
+            .maxBy { it.long("size") }
 
-    val calFile = index["directory"]["item"]
-        .find { it.text("name").endsWith("_cal.xml") }
-        ?.text("name") ?: ""
+        val calFile = index["directory"]["item"]
+            .find { it.text("name").endsWith("_cal.xml") }
+            ?.text("name") ?: ""
 
-    val humanReadableReportFileName = reportNode?.text("name") ?: ""
-    val xbrlFile = xmlXBRLReportPattern.find(calFile)?.groups?.get(1)?.let { matchGroup ->
-        index["directory"]["item"].find { it.text("name").endsWith("${matchGroup.value}.xml") }
-            ?.text("name")
-    } ?: humanReadableReportFileName
+        val humanReadableReportFileName = reportNode?.text("name") ?: ""
+        val xbrlFile = xmlXBRLReportPattern.find(calFile)?.groups?.get(1)?.let { matchGroup ->
+            index["directory"]["item"].find { it.text("name").endsWith("${matchGroup.value}.xml") }
+                ?.text("name")
+        } ?: humanReadableReportFileName
 
-    val filingSummary = try {
-        FilingSummary(asyncGet("$reportBaseUrl/FilingSummary.xml").byteStream())
-    } catch (e: Exception) {
-        null
+        val filingSummary = try {
+            FilingSummary(asyncGet("$reportBaseUrl/FilingSummary.xml").byteStream())
+        } catch (e: Exception) {
+            null
+        }
+
+        ReportFiles(
+            humanReadableReportFileName,
+            xbrlFile,
+            filingSummary?.getConsolidatedStatementOfCashFlow(),
+            filingSummary?.getConsolidatedStatementOfIncome(),
+            filingSummary?.getConsolidatedStatementOfOperation(),
+            filingSummary?.getConsolidatedBalanceSheet(),
+            filingSummary?.getFinancialSummary()
+        )
+    } else {
+        filing.files
     }
-
-    return ReportFiles(
-        humanReadableReportFileName,
-        xbrlFile,
-        filingSummary?.getConsolidatedStatementOfCashFlow(),
-        filingSummary?.getConsolidatedStatementOfIncome(),
-        filingSummary?.getConsolidatedStatementOfOperation(),
-        filingSummary?.getConsolidatedBalanceSheet(),
-        filingSummary?.getFinancialSummary()
-    )
 }
 
 fun downloadXBRL() {
@@ -76,9 +84,13 @@ fun downloadReports(ticker: String, refs: List<Filing>) {
             runBlocking {
                 val downloadedStuff = refs
                     .sortedByDescending { it.dateFiled }
-                    .filter { it.reportFiles != null }
-                    .distinctBy { it.reportFiles!!.xbrlReport }
-                    .mapAsync { downloadSingleReport(it) }
+                    .filter { it.files != null }
+                    .distinctBy { it.files!!.xbrlReport }
+                    .mapAsync { filing ->
+                        nullOnFailure(errorMessage = {"Failed to download XBRL data for ${filing.dataUrl} due to ${it.message}"}) {
+                            fetchXBRLData(filing)
+                        }
+                    }
                     .awaitAll()
 
                 if (downloadedStuff.isNotEmpty()) {
@@ -88,37 +100,24 @@ fun downloadReports(ticker: String, refs: List<Filing>) {
             }
 }
 
-suspend fun downloadSingleReport(filing: Filing): XBRL? {
-    var result: XBRL?
-    for (trialIndex in 0..2) {
-        try {
-            val (xbrl, income, cashflow, balance) = listOf(
-                filing.reportFiles?.xbrlReport,
-                filing.reportFiles?.income,
-                filing.reportFiles?.cashFlow,
-                filing.reportFiles?.balance)
-                .mapAsync {
-                    it?.let {
-                        asyncGetText("${filing.dataUrl}/$it")
-                    }
-                }.awaitAll()
+suspend fun fetchXBRLData(filing: Filing): XBRL = retry(limitAttempts(3) + constantDelay(5000)) {
+    val (xbrl, income, cashflow, balance) = listOf(
+        filing.files?.xbrlReport,
+        filing.files?.income,
+        filing.files?.cashFlow,
+        filing.files?.balance)
+        .mapAsync {
+            it?.let {
+                asyncGetText("${filing.dataUrl}/$it")
+            }
+        }.awaitAll()
 
-            result = XBRL(
-                filing.reportFiles!!.xbrlReport!!,
-                xbrl,
-                cashflow,
-                balance,
-                income)
-
-            return result
-        } catch (e: Exception) {
-            println("Failed to parse ${filing.reportFiles?.xbrlReport} due to ${e.message}, retrying")
-        }
-    }
-
-    println("Failed to parse ${filing.reportFiles?.xbrlReport} after 3 attempts")
-
-    return null
+    XBRL(
+        filing.files!!.xbrlReport!!,
+        xbrl,
+        cashflow,
+        balance,
+        income)
 }
 
 fun saveReportWithoutZipping(ticker: String, data: XBRL) {
