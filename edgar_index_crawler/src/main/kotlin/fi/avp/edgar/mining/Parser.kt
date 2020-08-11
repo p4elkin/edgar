@@ -3,8 +3,10 @@ package fi.avp.edgar.mining
 import com.mongodb.BasicDBObject
 import fi.avp.util.mapAsync
 import kotlinx.coroutines.*
-import org.bson.codecs.pojo.annotations.BsonId
-import org.litote.kmongo.*
+import org.litote.kmongo.and
+import org.litote.kmongo.eq
+import org.litote.kmongo.lt
+import org.litote.kmongo.or
 import org.springframework.boot.CommandLineRunner
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.runApplication
@@ -13,7 +15,6 @@ import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import java.io.InputStream
 import java.nio.charset.StandardCharsets
-import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.concurrent.Executors
 import kotlin.system.measureTimeMillis
@@ -60,8 +61,13 @@ suspend fun scrapeFilingFacts(filing: Filing): Filing = coroutineScope {
     suspend fun getClosestAnnualReport(filing: Filing): Filing? {
         val date = filing.dateFiled!!
         val sortCriteria = BasicDBObject("dateFiled", -1)
+        if (filing.formType == "10-K") {
+            return filing
+        }
         return Database.filings
-            .find(and(Filing::dateFiled lt date, Filing::formType eq "10-K"))
+            .find(and(
+                Filing::dateFiled lt date, Filing::formType eq "10-K"),
+                or(Filing::ticker eq filing.ticker, Filing::cik eq filing.cik))
             .sort(sortCriteria)
             .first()?.let {
                 collectFilingData(it)
@@ -69,7 +75,7 @@ suspend fun scrapeFilingFacts(filing: Filing): Filing = coroutineScope {
     }
 
     val actualFiling = async { collectFilingData(filing) }
-    val annualReportTask = async { if (filing.formType != "10-Q") null else getClosestAnnualReport(filing) }
+    val annualReportTask = async { getClosestAnnualReport(filing) }
     val previousYearFiling = async { getPreviousYearFiling(filing) }
 
     val withYearToYear = previousYearFiling.await()?. let {
