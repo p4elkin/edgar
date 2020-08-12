@@ -40,7 +40,7 @@ const Table = ({columns, data, fetchData, loading, pageCount: controlledPageCoun
     // Listen for changes in pagination and use the state to fetch our new data
     useEffect(() => {
         fetchData({ pageIndex, pageSize })
-    }, [fetchData, pageIndex, pageSize])
+    }, [pageIndex, pageSize])
 
     // Render the UI for your table
     return (
@@ -114,9 +114,7 @@ const Table = ({columns, data, fetchData, loading, pageCount: controlledPageCoun
                 </span>{' '}
                 <select
                     value={pageSize}
-                    onChange={e => {
-                        setPageSize(Number(e.target.value))
-                    }}>
+                    onChange={e => {setPageSize(Number(e.target.value))}}>
                     {[10, 20, 30, 40, 50].map(pageSize => (
                         <option key={pageSize} value={pageSize}>
                             Show {pageSize}
@@ -171,28 +169,30 @@ export const Filings = () => {
     );
 
     // We'll start our table without any data
-    const [data, setData] = useState([])
-    const [loading, setLoading] = useState(false)
-    const [pageCount, setPageCount] = useState(0)
-    const fetchIdRef = React.useRef(0)
+    const [data, setData] = useState([]);
+    const [loading, setLoading] = useState(false);
+    const [pageCount, setPageCount] = useState(1);
+    const fetchIdRef = React.useRef(0);
 
     const fetchData = async function({ pageSize, pageIndex }) {
         // Give this fetch an ID
         const fetchId = ++fetchIdRef.current
 
-        // TODO should only set data if fetchId is the current one
-        // if (fetchId === fetchIdRef.current) {
-
-        let fetchedFilings = await fetch("http://localhost:8888/latestFilings", {
-            limit: pageSize,
-            offset: pageIndex * pageSize
-        });
-
         // Set the loading state
-        setLoading(true)
-        setData(await fetchedFilings.json())
-        setLoading(false)
-        setPageCount(5) // TODO
+        setLoading(true);
+        if (fetchId === fetchIdRef.current) {
+            let url = new URL("http://localhost:8888/latestFilings"), params = {
+                    limit: pageSize,
+                    offset: pageIndex * pageSize,
+                    dayOffset: 10,
+                    revenueThreshold: 1000000000
+                };
+            Object.keys(params).forEach(key => url.searchParams.append(key, params[key]))
+            let fetchedFilings = await fetch(url);
+
+            setData(await fetchedFilings.json());
+            setLoading(false)
+        }
     };
 
     return (
