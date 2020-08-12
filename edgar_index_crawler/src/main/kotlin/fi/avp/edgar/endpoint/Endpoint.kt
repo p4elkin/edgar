@@ -5,6 +5,8 @@ import fi.avp.edgar.mining.*
 import fi.avp.util.asyncGetText
 import fi.avp.util.mapAsync
 import kotlinx.coroutines.*
+import kotlinx.serialization.ContextualSerialization
+import kotlinx.serialization.Serializable
 import org.litote.kmongo.*
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.runApplication
@@ -20,6 +22,7 @@ import org.springframework.web.cors.CorsConfiguration
 import org.springframework.web.cors.reactive.CorsWebFilter
 import org.springframework.web.cors.reactive.UrlBasedCorsConfigurationSource
 import java.time.LocalDate
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
 
 @SpringBootApplication
@@ -65,15 +68,18 @@ fun Filing.toDto(): FilingDTO {
         netIncome = valueInMillions(netIncome),
 
         liabilitiesYY = liabilities?.relativeYearToYearChange() ?: Double.NaN,
-        liabilities = valueInMillions(liabilities))
-
+        liabilities = valueInMillions(liabilities),
+        latestAnnualRevenue = valueInMillions(latestRevenue)
+    )
 }
 
+@Serializable
 data class FilingDTO(
     val ticker: String,
     val name: String,
     val reportLink: String,
     val interactiveData: String,
+    @ContextualSerialization
     val date: LocalDate,
     val type: String,
     val epsYY: Double,
@@ -83,7 +89,8 @@ data class FilingDTO(
     val netIncomeYY: Double,
     val netIncome: Double,
     val liabilitiesYY: Double,
-    val liabilities: Double
+    val liabilities: Double,
+    val latestAnnualRevenue: Double
 )
 
 @Component
@@ -111,46 +118,29 @@ class CurrentIndexCrawler {
         }
     }
 
-    class Filings(val filings: List<Filing>) {
-
-        val relatedAnnualReports: Map<Filing, Filing>
-        val filingById: Map<String, Filing>
-
-        init {
-            filingById = filings.map { it._id!! to it }.toMap()
-            relatedAnnualReports = filings
-                .filter { it.closestYearReportId != null }
-                .map { it to filingById[it.closestYearReportId]!! }
-                .toMap()
-        }
-    }
-
     @RestController
     open class Endpoint() {
 
-//        private val filings = runBlocking {
-//            Database.filings.find(Filing::dateFiled gt LocalDate.now().minusDays(2000)).toList()
-//        }
-
-        private val cache = runBlocking {
-            Database.filings.find(Filing::dateFiled gt LocalDate.now().minusDays(100)).toList()
+        private val cache = GlobalScope.async {
+            Database.filings.find(Filing::dateFiled gt LocalDate.now().minusYears(1)).toList()
         }
 
         @GetMapping(value = ["/filingCount"], produces = [])
-        fun countFilings(@RequestParam dayOffset: Int, @RequestParam revenueThreshold: Int): Int {
+        suspend fun countFilings(@RequestParam dayOffset: Int, @RequestParam revenueThreshold: Int): Int {
             val earliestDate = LocalDate.now().minusDays(dayOffset.toLong())
-            return cache.filter {
-                it.assets?.value?.let { it > revenueThreshold} ?: false &&
+            return cache.await().filter {
+                it.latestRevenue?.let { it > revenueThreshold} ?: false &&
                 it.dateFiled!!.isAfter(earliestDate)
             }.count()
         }
 
         @GetMapping(value = ["/latestFilings"], produces = [MediaType.APPLICATION_JSON_VALUE])
-        fun latestReports(@RequestParam limit: Int, @RequestParam offset: Int, @RequestParam revenueThreshold: Long = 1000_000_000, @RequestParam dayOffset: Int = 5): List<FilingDTO> {
+        suspend fun latestReports(@RequestParam limit: Int, @RequestParam offset: Int, @RequestParam revenueThreshold: Long, @RequestParam dayOffset: Int): List<FilingDTO> {
             val earliestDate = LocalDate.now().minusDays(dayOffset.toLong())
             return cache
+                .await()
                 .filter {
-                    val isEarningEnough = it.assets?.value?.let { it > revenueThreshold} ?: false
+                    val isEarningEnough = it.latestRevenue?.let { it > revenueThreshold} ?: false
                     isEarningEnough && it.dateFiled!!.isAfter(earliestDate)
                 }
                 .drop(offset)
