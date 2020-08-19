@@ -135,7 +135,7 @@ export const Filings = () => {
                 columns: [
                     {
                         Header: 'Ticker',
-                        accessor: 'ticker',
+                        accessor: row => `${row.name} (${row.ticker})`,
                     },
                     {
                         Header: 'Date',
@@ -151,8 +151,8 @@ export const Filings = () => {
                 Header: 'Metrics',
                 columns: [
                     {
-                        Header: 'Dillutted EPS',
-                        accessor: 'eps',
+                        Header: 'Current EPS (year-to-year)',
+                        accessor: row => `${row.eps} (${row.epsYY})`,
                     },
                     {
                         Header: 'Revenue',
@@ -161,6 +161,16 @@ export const Filings = () => {
                     {
                         Header: 'Net Income',
                         accessor: 'netIncome',
+                    },
+                    {
+                        Header: 'Latest yearly revenue ($ millions)',
+                        accessor: 'latestAnnualRevenue',
+                    },
+
+                    {
+                        Header: 'Filing',
+                        accessor: 'interactiveData',
+                        Cell: ( {value} ) => <a href={value}>Filing</a>,
                     }
                 ],
             },
@@ -181,7 +191,7 @@ export const Filings = () => {
         // Set the loading state
         setLoading(true);
         if (fetchId === fetchIdRef.current) {
-            let url = new URL("http://localhost:8888/latestFilings"), params = {
+            let url = new URL("http://91.158.200.239:8888/latestFilings"), params = {
                     limit: pageSize,
                     offset: pageIndex * pageSize,
                     dayOffset: 10,
