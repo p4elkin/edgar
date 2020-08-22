@@ -5,6 +5,8 @@ import styled from "styled-components";
 import {useGlobalState} from "../state";
 import TextField from "@material-ui/core/TextField";
 import {DelayInput} from "react-delay-input";
+import FormControlLabel from "@material-ui/core/FormControlLabel";
+import Checkbox from "@material-ui/core/Checkbox";
 
 export const FilterBar = () => {
     const [{filter}, dispatch] = useGlobalState()
@@ -34,6 +36,17 @@ export const FilterBar = () => {
                 onChange={(event) => {
                     dispatch({type:'updateFilter', updatedFilter: {...filter, company: event.target.value}})
                 }}
+            />
+            <FormControlLabel
+                value="end"
+                control={
+                    <Checkbox
+                        color="primary"
+                        margin="normal"
+                    />}
+                margin="normal"
+                label="10-K only"
+                labelPlacement="end"
             />
         </Styles>
     )
