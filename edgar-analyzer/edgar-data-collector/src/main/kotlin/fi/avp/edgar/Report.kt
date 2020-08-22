@@ -1,6 +1,5 @@
 package fi.avp.edgar
 
-import fi.avp.edgar.data.attrNames
 import fi.avp.util.attr
 import fi.avp.util.find
 import fi.avp.util.list
