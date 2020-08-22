@@ -1,188 +1,14 @@
 import React, {useEffect, useState} from 'react'
-import styled from 'styled-components'
-import { useTable, usePagination } from 'react-table'
-
-// Let's add a fetchData method to our Table component that will be used to fetch
-// new data when pagination state changes
-// We can also add a loading state to let our table know it's loading new data
-const Table = ({columns, data, fetchData, loading, pageCount: controlledPageCount}) => {
-
-    const {
-        getTableProps,
-        getTableBodyProps,
-        headerGroups,
-        prepareRow,
-        page,
-        canPreviousPage,
-        canNextPage,
-        pageOptions,
-        pageCount,
-        gotoPage,
-        nextPage,
-        previousPage,
-        setPageSize,
-        // Get the state from the instance
-        state: { pageIndex, pageSize },
-    } = useTable(
-        {
-            columns,
-            data,
-            initialState: { pageIndex: 0 }, // Pass our hoisted table state
-            manualPagination: true, // Tell the usePagination
-            // hook that we'll handle our own data fetching
-            // This means we'll also have to provide our own
-            // pageCount.
-            pageCount: controlledPageCount,
-        },
-        usePagination
-    );
-
-    // Listen for changes in pagination and use the state to fetch our new data
-    useEffect(() => {
-        fetchData({ pageIndex, pageSize })
-    }, [pageIndex, pageSize])
-
-    // Render the UI for your table
-    return (
-        <>
-            <table {...getTableProps()}>
-                <thead>
-                {headerGroups.map(headerGroup => (
-                    <tr {...headerGroup.getHeaderGroupProps()}>
-                        {headerGroup.headers.map(column => (
-                            <th {...column.getHeaderProps()}>
-                                {column.render('Header')}
-                                <span>{column.isSorted ? column.isSortedDesc ? ' 🔽' : ' 🔼' : ''}</span>
-                            </th>
-                        ))}
-                    </tr>
-                ))}
-                </thead>
-                <tbody {...getTableBodyProps()}>
-                {page.map((row, i) => {
-                    prepareRow(row)
-                    return (
-                        <tr {...row.getRowProps()}>
-                            {row.cells.map(cell => {
-                                return <td {...cell.getCellProps()}>{cell.render('Cell')}</td>
-                            })}
-                        </tr>
-                    )
-                })}
-                <tr>
-                    {loading ? (
-                        // Use our custom loading state to show a loading indicator
-                        <td colSpan="10000">Loading...</td>) : (
-                        <td colSpan="10000">
-                            Showing {page.length} of ~{controlledPageCount * pageSize}{' '}
-                            results
-                        </td>
-                    )}
-                </tr>
-                </tbody>
-            </table>
-            {/*
-        Pagination can be built however you'd like.
-        This is just a very basic UI implementation:
-      */}
-            <div className="pagination">
-                <button onClick={() => gotoPage(0)} disabled={!canPreviousPage}>
-                    {'<<'}
-                </button>{' '}
-                <button onClick={() => previousPage()} disabled={!canPreviousPage}>
-                    {'<'}
-                </button>{' '}
-                <button onClick={() => nextPage()} disabled={!canNextPage}>
-                    {'>'}
-                </button>{' '}
-                <button onClick={() => gotoPage(pageCount - 1)} disabled={!canNextPage}>
-                    {'>>'}
-                </button>{' '}
-                <span>
-                    Page{' '}<strong>{pageIndex + 1} of {pageOptions.length}</strong>{' '}
-                </span>
-                <span>| Go to page:{' '}
-                    <input
-                        type="number"
-                        defaultValue={pageIndex + 1}
-                        onChange={e => {
-                            const page = e.target.value ? Number(e.target.value) - 1 : 0
-                            gotoPage(page)
-                        }}
-                        style={{ width: '100px' }}
-                    />
-                </span>{' '}
-                <select
-                    value={pageSize}
-                    onChange={e => {setPageSize(Number(e.target.value))}}>
-                    {[10, 20, 30, 40, 50].map(pageSize => (
-                        <option key={pageSize} value={pageSize}>
-                            Show {pageSize}
-                        </option>
-                    ))}
-                </select>
-            </div>
-        </>
-    )
-};
+import {FilingGrid} from "./table";
+import {useGlobalState} from "../state";
 
 
 export const Filings = () => {
-    const columns = React.useMemo(
-        () => [
-            {
-                Header: 'Info',
-                columns: [
-                    {
-                        Header: 'Ticker',
-                        accessor: row => `${row.name} (${row.ticker})`,
-                    },
-                    {
-                        Header: 'Date',
-                        accessor: 'date',
-                    },
-                    {
-                        Header: 'Report type',
-                        accessor: 'type',
-                    },
-                ],
-            },
-            {
-                Header: 'Metrics',
-                columns: [
-                    {
-                        Header: 'Current EPS (year-to-year)',
-                        accessor: row => `${row.eps} (${row.epsYY})`,
-                    },
-                    {
-                        Header: 'Revenue',
-                        accessor: 'revenue',
-                    },
-                    {
-                        Header: 'Net Income',
-                        accessor: 'netIncome',
-                    },
-                    {
-                        Header: 'Latest yearly revenue ($ millions)',
-                        accessor: 'latestAnnualRevenue',
-                    },
-
-                    {
-                        Header: 'Filing',
-                        accessor: 'interactiveData',
-                        Cell: ( {value} ) => <a href={value}>Filing</a>,
-                    }
-                ],
-            },
-        ],
-        []
-    );
-
-    // We'll start our table without any data
+    const columns = React.useMemo(configureColumns, []);
     const [data, setData] = useState([]);
     const [loading, setLoading] = useState(false);
-    const [pageCount, setPageCount] = useState(1);
     const fetchIdRef = React.useRef(0);
+    const [{filter}] = useGlobalState()
 
     const fetchData = async function({ pageSize, pageIndex }) {
         // Give this fetch an ID
@@ -191,12 +17,13 @@ export const Filings = () => {
         // Set the loading state
         setLoading(true);
         if (fetchId === fetchIdRef.current) {
-            let url = new URL("http://91.158.200.239:8888/latestFilings"), params = {
-                    limit: pageSize,
-                    offset: pageIndex * pageSize,
-                    dayOffset: 10,
-                    revenueThreshold: 1000000000
-                };
+            let url = new URL("http://localhost:8888/latestFilings"), params = {
+                limit: pageSize,
+                offset: pageIndex * pageSize,
+                until: filter.startDate,
+                company: filter.company,
+                revenueThreshold: 1000000000
+            };
             Object.keys(params).forEach(key => url.searchParams.append(key, params[key]))
             let fetchedFilings = await fetch(url);
 
@@ -205,48 +32,78 @@ export const Filings = () => {
         }
     };
 
-    return (
-        <Styles>
-            <Table
-                columns={columns}
-                data={data}
-                fetchData={fetchData}
-                loading={loading}
-                pageCount={pageCount}
-            />
-        </Styles>
-    )
+    return (<FilingGrid filter={filter} columns={columns} data={data} fetchData={fetchData} loading={loading}/>)
 }
 
-const Styles = styled.div`
-  padding: 1rem;
+const cellWithTwoValues = (right, left) => {
+    return (<>
+        <span style={{float: "left"}}>{right}</span>
+        <span style={{float: "right"}}>{left}</span>
+    </>)
+}
 
-  table {
-    border-spacing: 0;
-    border: 1px solid black;
+const metric = (right, left) => {
+    const color = left > 0 ? "green" : "red"
+    const increaseStr = left > 0 ? `+${left}` : left
+    return (<>
+        <span style={{float: "left"}}>{right}</span>
+        <span style={{float: "right", color: color}}>({increaseStr}%)</span>
+    </>)
+}
 
-    tr {
-      :last-child {
-        td {
-          border-bottom: 0;
-        }
-      }
+const formatNumber = (num) => {
+    return Number.parseFloat(num).toFixed(2)
+}
+
+const formatMetric = (value, yearToYearRatio) => {
+    const numValue = Number.parseFloat(value)
+    if (Number.isNaN(numValue)) {
+        return (<span>-</span>)
+    } else {
+        const yearToYearInPercents = formatNumber((Number.parseFloat(yearToYearRatio) - 1.0) * 100.0)
+        return metric(numValue.toFixed(2), `${yearToYearInPercents}`)
     }
+}
 
-    th,
-    td {
-      margin: 0;
-      padding: 0.5rem;
-      border-bottom: 1px solid black;
-      border-right: 1px solid black;
+const configureColumns = () => [
+    {
+        Header: 'Filings',
+        columns: [
+            {
+                Header: 'Company',
+                accessor: row => ({name: row.name, ticker: row.ticker}),
+                Cell: ({value}) => cellWithTwoValues(value.name, value.ticker)
+            },
+            {
+                Header: 'Date',
+                accessor: 'date',
+            },
+            {
+                Header: 'Report type',
+                accessor: 'type',
+            },
+            {
+                Header: 'Current EPS',
+                accessor: row => formatMetric(row.eps, row.epsYY),
+            },
+            {
+                Header: 'Revenue ($ millions)',
+                accessor: row => formatMetric(row.revenue, row.revenueYY),
+            },
+            {
+                Header: 'Net Income ($ millions)',
+                accessor: row => formatMetric(row.netIncome, row.netIncomeYY),
+            },
+            {
+                Header: 'Latest yearly revenue ($ millions)',
+                accessor: 'latestAnnualRevenue',
+            },
 
-      :last-child {
-        border-right: 0;
-      }
+            {
+                Header: 'Filing',
+                accessor: 'interactiveData',
+                Cell: ({value}) => <a href={value}>Filing</a>,
+            }
+        ],
     }
-  }
-
-  .pagination {
-    padding: 0.5rem;
-  }
-`;
+];
