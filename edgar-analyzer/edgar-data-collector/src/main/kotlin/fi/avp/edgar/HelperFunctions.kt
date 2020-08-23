@@ -160,7 +160,9 @@ fun main() {
 //    consolidateCompanyInfo()
 //    resolveAnnualReportReferencesSince()
     runBlocking {
-        resolveAnnualReferencesAndYearToYearDiffs(1000)
+//        fixDataExtractionStatus()
+        resolveAnnualReferencesAndYearToYearDiffs(1)
+//        dump10KReportsToCSVRowPerFiling()
     }
 }
 
@@ -240,23 +242,22 @@ suspend fun dump10KReportsToCSVRowPerFiling() {
     val cols = listOf("ticker", "date").plus(metrics.keys).plus("dataUrl")
     val buffer = StringBuilder()
 
-    buffer.appendln(cols.joinToString(separator = ","))
-    Database.getSP500Companies().forEach { companyInfo ->
-        val allReports = companyInfo.cik
-            .flatMap { Database.getFilingsByCik(it.toString()) }
-            .filter { it.formType == "10-K" }
-
-        allReports.forEach { filing ->
-            val metrics = metrics.map { (_, prop) ->
+    buffer.appendLine(cols.joinToString(separator = ","))
+    Database.filings.find(Filing::formType eq "10-K").consumeEach { filing ->
+        val metrics = metrics.map { (_, prop) ->
+            try {
                 prop.get(filing)?.value?.toBigDecimal()?.toPlainString()?.toString() ?: "null"
+            } catch (e: NumberFormatException) {
+                e.printStackTrace()
+                null
             }
-
-            buffer.appendln(
-                listOf(companyInfo.primaryTicker, filing.dateFiled)
-                    .plus(metrics)
-                    .plus(filing.dataUrl)
-                    .joinToString(separator = ","))
         }
+
+        buffer.appendln(
+            listOf(filing.ticker, filing.dateFiled)
+                .plus(metrics)
+                .plus(filing.dataUrl)
+                .joinToString(separator = ","))
     }
 
     file.writeText(buffer.toString())
@@ -355,26 +356,44 @@ suspend fun resolveFilingTickers() {
     }
 }
 
+suspend fun fixDataExtractionStatus() {
+    val list = Database.filings.find("{extractedData: {\$ne: null}, dataExtractionStatus: null}").toList()
+    list.forEach {
+        Database.filings.replaceOne(it.copy(dataExtractionStatus = OperationStatus.DONE))
+    }
+}
+
 suspend fun resolveAnnualReferencesAndYearToYearDiffs(months: Long) {
+    val allFilings = Database.filings.find().consumeEach {
+        val filing = it
+            .withClosestAnnualReportLink()
+            .withYearToYearDiffs()
+
+        val result = Database.filings.replaceOne(filing)
+        if (!result.wasAcknowledged()) {
+            println("failed to update: $result")
+        } else {
+            println("updated: ${filing.companyName} from ${filing.dateFiled}")
+        }
+    }
+}
+
+suspend fun fixDataExtraction(months: Long) {
     val allFilings = Database.getAllFilings()
 //    val allFilings = Database.filings.find("{ticker: 'AAPL'}").toList()
     runOnComputationThreadPool {
-        allFilings.chunked(1000).forEach {
+        allFilings.chunked(150).forEach {
             it.mapAsync {
-                if (it.extractedData != null) {
-                    Database.filings.replaceOne(it.withExtractedMetrics().copy(dataExtractionStatus = OperationStatus.DONE))
-                } else {
-                    val filing = it
-                        .withBasicFilingData()
-                        .withExtractedMetrics()
+                val filing = it
+                    .withBasicFilingData()
+                    .withExtractedMetrics()
 //                    .withClosestAnnualReportLink()
 //                    .withYearToYearDiffs()
-                    val result = Database.filings.replaceOne(filing)
-                    if (!result.wasAcknowledged()) {
-                        println("failed to update: $result")
-                    } else {
-                        println("updated: ${filing.companyName} from ${filing.dateFiled}")
-                    }
+                val result = Database.filings.replaceOne(filing)
+                if (!result.wasAcknowledged()) {
+                    println("failed to update: $result")
+                } else {
+                    println("updated: ${filing.companyName} from ${filing.dateFiled}")
                 }
             }.awaitAll()
         }

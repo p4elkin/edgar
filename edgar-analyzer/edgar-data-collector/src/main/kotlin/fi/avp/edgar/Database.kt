@@ -54,7 +54,7 @@ object Database {
                         val (filings, time) = measureTimedValue {
                             filings
                                 .find(and(Filing::dateFiled gt it.start, Filing::dateFiled lt it.endInclusive))
-//                                .projection(fields(exclude(Filing::extractedData)))
+                                .projection(fields(exclude(Filing::extractedData)))
                                 .toList()
                         }
                         println("Fetched ${filings.size} filings between ${it.start} and ${it.endInclusive} on ${Thread.currentThread().name} in $time")
