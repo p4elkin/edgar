@@ -3,10 +3,12 @@ package fi.avp.edgar
 import kotlinx.coroutines.runBlocking
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
+import org.jsoup.parser.Parser
 import org.w3c.dom.Document
 import java.io.BufferedReader
 import java.io.InputStream
 import java.nio.charset.StandardCharsets
+import javax.xml.crypto.Data
 import javax.xml.parsers.DocumentBuilderFactory
 import javax.xml.xpath.XPath
 import javax.xml.xpath.XPathFactory
@@ -14,23 +16,113 @@ import kotlin.system.measureTimeMillis
 
 val propertyPattern = Regex(".*_(.+),")
 
+data class Column(
+    val id: String,
+    val labels: Set<String>
+)
+
+data class Value(
+    val value: String,
+    val columnId: String
+)
+
+data class Section(
+    val id: String,
+    val rows: MutableSet<Row> = hashSetOf()
+)
+
+data class Row(
+    val propertyId: String,
+    val label: String,
+    val values: List<Value> = emptyList()
+)
+
 fun main() {
     runBlocking {
-        Database.getSP500Companies().forEach {
-            val companyInfo = it
-            val doneIn = measureTimeMillis {
-                val filings =
-                    it.cik.flatMap {
-                        runBlocking {
-                            Database.getFilingsByCik(it.toString())
+        Database.filings.find("{ticker: 'AAPL'}").consumeEach {
+            it.files?.cashFlow(it.dataUrl!!)?.let { cashflow ->
+                val xml = cashflow.replace("<link rel=\"StyleSheet\" type=\"text/css\" href=\"report.css\">", "")
+                    .replace("'", "")
+                    .replace("<br>", "")
+
+                try {
+                    println(it.files?.xbrlReport)
+                    val document = Jsoup.parse(xml, StandardCharsets.UTF_8.name(), Parser.xmlParser())
+                    val columnsNode = document.select("Columns")
+                    if (columnsNode.size > 0) {
+                        val columns = columnsNode.select("Column").toList()
+                        val parsedColumnInfo = columns.map {
+                            Column(
+                                id = it.selectFirst("Id").text(),
+                                labels = it
+                                    .select("Labels")
+                                    .select("Label")
+                                    .map {
+                                        it.attr("Label")
+                                    }.toSet())
+                        }.toList()
+
+                        val sections = ArrayList<Section>()
+                        var currentSection: Section? = null
+                        document.select("Rows").select("Row").map { row ->
+                            val propertyId = row.select("ElementName").text().replace("_", ":")
+                            val isSectionRow = row.select("IsAbstractGroupTitle").text().toBoolean()
+                            val label = row.select("Label").text()
+
+                            if (isSectionRow) {
+                                val newSection = Section(propertyId)
+                                sections.add(newSection)
+                                currentSection = newSection
+                            } else {
+                                if (currentSection == null) {
+                                    val defaultSection = Section("")
+                                    sections.add(defaultSection)
+                                    currentSection = defaultSection
+                                }
+
+                                val values = row.select("Cells").select("Cell").map { cell ->
+                                    Value(
+                                        value = cell.select("RoundedNumericAmount").text(),
+                                        columnId = cell.select("Id").text())
+                                }.toList()
+
+                                currentSection!!.rows.add(Row(propertyId, label, values))
+                            }
                         }
-                    }.filter { it.formType == "10-K" }
 
-                val reportData = getCompanyReports(it.primaryTicker)
+                        println(sections)
+                    } else {
+                        val rows = document.select("tr")
+                            .map {
 
-                filings.forEach {
-                    extractCashflowReconciliationData(it, companyInfo, reportData)
+                            }
+
+                    }
+
+//                    println(parsed.extract())
+                } catch (e: Exception) {
+
                 }
+            }
+        }
+    }
+}
+
+suspend fun calcNonPaperCashflow() {
+    Database.getSP500Companies().forEach {
+        val companyInfo = it
+        val doneIn = measureTimeMillis {
+            val filings =
+                it.cik.flatMap {
+                    runBlocking {
+                        Database.getFilingsByCik(it.toString())
+                    }
+                }.filter { it.formType == "10-K" }
+
+            val reportData = getCompanyReports(it.primaryTicker)
+
+            filings.forEach {
+                extractCashflowReconciliationData(it, companyInfo, reportData)
             }
         }
     }
