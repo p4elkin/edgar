@@ -118,7 +118,7 @@ data class ExtractedValue (
             }
 
         } catch(e: Exception) {
-            Double.NaN
+            if (value.isBlank() || value == "—" || value == "-") 0.0 else Double.NaN
         }
     }
 
@@ -156,9 +156,10 @@ data class Filing(
     val operatingCashFlow: Metric? = null,
     val financingCashFlow: Metric? = null,
     val liabilities: Metric? = null,
-    val sharesOutstanding: Metric? = null,
+    val sharesOutstanding: Long? = null,
     val eps: Metric? = null,
     val assets: Metric? = null,
+    val cashIncome: Double? = null,
 
     val fiscalYear: Long? = null,
     val ticker: String? = null,
@@ -250,7 +251,6 @@ data class Filing(
                 println("$path missing, creating")
                 val fileData = fetchFiles()
                 // if file still doesn't exist
-                // TODO - replace with a queue?!
                 if (!Files.exists(path)) {
                     val newZipFile = Files.createFile(path).toFile()
                     ZipOutputStream(newZipFile.outputStream().buffered()).use { out ->
@@ -262,6 +262,24 @@ data class Filing(
             }
 
             return path
+        }
+
+        suspend fun cashFlow(dataUrl: String): String? {
+            return cashFlow?.let {
+                getFileContents(it, dataUrl)
+            }
+        }
+
+        suspend fun balance(dataUrl: String): String? {
+            return balance?.let {
+                getFileContents(it, dataUrl)
+            }
+        }
+
+        suspend fun income(dataUrl: String): String? {
+            return income?.let {
+                getFileContents(it, dataUrl)
+            }
         }
     }
 }

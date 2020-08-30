@@ -10,30 +10,13 @@ import org.bson.Document
 import org.bson.types.ObjectId
 import org.litote.kmongo.*
 import org.litote.kmongo.coroutine.*
+import java.lang.Exception
 import java.nio.file.Paths
 import java.time.LocalDate
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.system.measureTimeMillis
 import kotlin.time.measureTimedValue
-
-
-@Serializable
-data class CompanyInfo(
-    val _id: String? = null,
-    val primaryTicker: String,
-    val tickers: Set<String> = emptySet(),
-    val isInSP500: Boolean = false,
-    val cik: Set<Int>,
-    val names: Set<String>,
-    val description: String = "",
-    val exchange: String = "",
-    val sic: Int = -1)
-
-@Serializable
-data class SecCompanyRecord(
-    val cik_str: Int,
-    val title: String,
-    val ticker: String)
 
 /**
  * Take the data from sec (json file extract) and company info from internet.
@@ -42,6 +25,12 @@ data class SecCompanyRecord(
  * ticker and aggregates them into a single record.
  */
 suspend fun consolidateCompanyInfo() {
+    @Serializable
+    data class SecCompanyRecord(
+        val cik_str: Int,
+        val title: String,
+        val ticker: String)
+
     val secTickerDatabase = Database.database.getCollection<SecCompanyRecord>("sec-ticker-database")
         .find()
         .toList()
@@ -118,7 +107,6 @@ suspend fun consolidateCompanyInfo() {
             companyList.insertOne(it)
         }
 
-//    val sP500Tickers = Database.getSP500Tickers()
     companyList.find().toList().forEach {
         var tickers = it.tickers
             .flatMap { setOf(it, it.replace('-', '.'), it.replace('.', '-')) }.toSet()
@@ -132,10 +120,6 @@ suspend fun consolidateCompanyInfo() {
 //        }
         companyList.replaceOne(it.copy(tickers = tickers))
     }
-}
-
-suspend fun extractMetricsFromAllFilings() {
-
 }
 
 suspend fun findReportsWithMultipleEPS() {
@@ -160,22 +144,12 @@ fun main() {
 //    consolidateCompanyInfo()
 //    resolveAnnualReportReferencesSince()
     runBlocking {
-//        fixDataExtractionStatus()
-        resolveAnnualReferencesAndYearToYearDiffs(1)
-//        dump10KReportsToCSVRowPerFiling()
+//        fixDataExtraction()
+//        resolveCashIncomeForAnnualFilings()
+        dump10KReportsToCSVRowPerFiling()
     }
 }
 
-val years = 2011..2019
-val metrics = mapOf(
-    "revenue" to Filing::revenue,
-    "netIncome" to Filing::netIncome,
-    "eps" to Filing::eps,
-    "assets" to Filing::revenue,
-    "financingCashFlow" to Filing::financingCashFlow,
-    "investingCashFlow" to Filing::investingCashFlow,
-    "operatingCashFlow" to Filing::operatingCashFlow,
-    "liabilities" to Filing::liabilities)
 
 suspend fun extractMetrics(update: (Filing) -> Filing) {
     val reports = Database.database.getCollection<Filing>("sp500")
@@ -238,85 +212,75 @@ fun resolveAnnualReportReferencesSince() {
 }
 
 suspend fun dump10KReportsToCSVRowPerFiling() {
+    val years = 2011..2019
+    val metrics = mapOf(
+        "revenue" to Filing::revenue,
+        "netIncome" to Filing::netIncome,
+        "eps" to Filing::eps,
+        "assets" to Filing::assets,
+        "financingCashFlow" to Filing::financingCashFlow,
+        "investingCashFlow" to Filing::investingCashFlow,
+        "operatingCashFlow" to Filing::operatingCashFlow,
+        "equity" to Filing::equity,
+        "liabilities" to Filing::liabilities)
+
+
     val file = Paths.get("/Users/sasha/temp/10-k-filings.csv").toFile()
-    val cols = listOf("ticker", "date").plus(metrics.keys).plus("dataUrl")
+    val cols = listOf("ticker", "date", "fiscalYear", "sharesOutstanding", "reconcileNetIncomeToCashflow").plus(metrics.keys).plus("dataUrl")
     val buffer = StringBuilder()
 
+    val liveCompanies = Database.getLiveCompanies()
+    val blueCaps = Database.getSP500Companies()
+    val isBlueCap: (Filing) -> Boolean = { filing ->
+        blueCaps.any { it.cik.contains(filing.cik?.toInt()) || it.tickers.contains(filing.ticker) }
+    }
+
+    var missRate = 0L;
+    var successRate = 0L;
     buffer.appendLine(cols.joinToString(separator = ","))
-    Database.filings.find(Filing::formType eq "10-K").consumeEach { filing ->
-        val metrics = metrics.map { (_, prop) ->
-            try {
-                prop.get(filing)?.value?.toBigDecimal()?.toPlainString()?.toString() ?: "null"
-            } catch (e: NumberFormatException) {
-                e.printStackTrace()
+    Database.filings.find(
+        and(Filing::formType eq "10-K")
+    ).toList()
+        .filter { it.revenue?.value?.let { it > 1000000000} ?: true }
+//        .filter { liveCompanies.contain(it) }
+        .filter { isBlueCap(it) }
+        .sortedByDescending { it.revenue?.value }
+        .map { filing ->
+            val metrics = metrics.map { (_, prop) ->
+                try {
+                    val value = prop.get(filing)
+                        ?.value
+                        ?.toBigDecimal()
+                        ?.toPlainString()
+
+                    if (value != null) {
+                        successRate++
+                    } else {
+                        missRate++
+                    }
+                    value ?: "null"
+                } catch (e: NumberFormatException) {
+                    missRate++;
+                    null
+                }
+            }
+
+            val adjustmentsToReconcileNetIncomeToCashflow = try {
+                filing.cashIncome?.toBigDecimal()?.toPlainString()
+            } catch (e: java.lang.NumberFormatException) {
+                println("failed to parse ${filing.cashIncome}")
                 null
             }
-        }
-
         buffer.appendln(
-            listOf(filing.ticker, filing.dateFiled)
+            listOf(filing.ticker, filing.dateFiled, filing.fiscalYear, filing.sharesOutstanding, adjustmentsToReconcileNetIncomeToCashflow)
                 .plus(metrics)
                 .plus(filing.dataUrl)
                 .joinToString(separator = ","))
     }
 
+    println("miss rate: $missRate")
+    println("success rate: $successRate")
     file.writeText(buffer.toString())
-}
-
-private suspend fun dump10KReportsToCSVRowPerCompany() {
-    val file = Paths.get("/Users/sasha/temp/sample.csv").toFile()
-
-    val buffer = StringBuilder()
-    buffer.appendln(metrics.flatMap { (id, prop) ->
-        years.map {
-            "$id$it"
-        }
-    }.joinToString(separator = ",", prefix = "ticker,"))
-
-    Database.getSP500Companies().forEach {
-        val allReports = it.cik.flatMap { Database.getFilingsByCik(it.toString()) }.filter { it.formType == "10-K" }
-
-        val byFiscalYear = getByFiscalYear(allReports)
-
-        val entry = metrics.flatMap { (id, prop) ->
-            years.map {
-                byFiscalYear[it]?.let {
-                    prop.get(it)?.value?.toBigDecimal()?.toPlainString()?.toString() ?: "null"
-                }
-            }
-        }.joinToString(separator = ",", prefix = "${it.primaryTicker},")
-        buffer.appendln(entry)
-    }
-
-    file.writeText(buffer.toString())
-}
-
-
-fun getByFiscalYear(reports: List<Filing>): Map<Int, Filing> {
-    return reports.groupBy { it.fiscalYear?.toInt() ?: -1 }.filterKeys { it > 0 }.mapValues { it.value.first() }
-}
-
-suspend fun fixDecimalsInSP500AnnualReports() {
-    val sP500Companies = Database.getSP500Companies()
-    sP500Companies.forEach {
-        val filing = it.cik.flatMap {
-            Database.getFilingsByCik(it.toString())
-        }.filter { it.formType == "10-K" }
-
-        filing.forEach {
-            Database.filings.save(it.copy(
-                assets = Assets.get(it),
-                revenue = Revenue.get(it),
-                eps = Eps.get(it),
-                liabilities = Liabilities.get(it),
-                operatingCashFlow = OperatingCashFlow.get(it),
-                financingCashFlow = FinancingCashFlow.get(it),
-                investingCashFlow = InvestingCashFlow.get(it),
-                netIncome = NetIncome.get(it),
-                fiscalYear = FiscalYearExtractor.get(it)?.toLong()
-            ))
-        }
-    }
 }
 
 suspend fun resolveFiles() {
@@ -329,14 +293,12 @@ suspend fun resolveFiles() {
 
         download.forEach { filing ->
             coroutineScope {
-                async {
                     println("saving ${filing.companyName} -> ${filing.ticker}")
                     val result = Database.filings.replaceOne(filing)
                     if (!result.wasAcknowledged()) {
                         println("failed to update: $result")
                     }
                 }
-            }
         }
     }
 }
@@ -363,39 +325,65 @@ suspend fun fixDataExtractionStatus() {
     }
 }
 
-suspend fun resolveAnnualReferencesAndYearToYearDiffs(months: Long) {
-    val allFilings = Database.filings.find().consumeEach {
-        val filing = it
-            .withClosestAnnualReportLink()
-            .withYearToYearDiffs()
-
-        val result = Database.filings.replaceOne(filing)
-        if (!result.wasAcknowledged()) {
-            println("failed to update: $result")
-        } else {
-            println("updated: ${filing.companyName} from ${filing.dateFiled}")
+suspend fun resolveCashIncomeForAnnualFilings() {
+    val allFilings = Database.getAllFilings("{formType: '10-K'}}")
+    counter.set(0)
+    runOnComputationThreadPool {
+        allFilings.forEachAsync {
+            it.consumeEach { filing ->
+                val cashIncome = calculateReconciliationValues(filing)
+                println("Cash income for ${filing.dataUrl}/${filing.files?.cashFlow} is $cashIncome")
+                val updatedFiling = filing.copy(cashIncome = cashIncome)
+                val result = Database.filings.replaceOne(updatedFiling)
+                if (!result.wasAcknowledged()) {
+                    println("${counter.incrementAndGet()} failed to update: $result")
+                } else {
+                    println("${counter.incrementAndGet()} updated: ${updatedFiling.companyName} from ${updatedFiling.dateFiled}")
+                }
+            }
         }
     }
 }
 
-suspend fun fixDataExtraction(months: Long) {
-    val allFilings = Database.getAllFilings()
-//    val allFilings = Database.filings.find("{ticker: 'AAPL'}").toList()
+val counter = AtomicInteger(0)
+suspend fun resolveAnnualReferencesAndYearToYearDiffs(months: Long) = runOnComputationThreadPool {
+    Database.getAllFilings().mapAsync {
+        it.consumeEach {
+            val filing = it
+//                .withExtractedMetrics()
+                .withClosestAnnualReportLink()
+                .withYearToYearDiffs()
+
+            val result = Database.filings.replaceOne(filing)
+            if (!result.wasAcknowledged()) {
+                println("failed to update: $result")
+            } else {
+
+                println("[${counter.incrementAndGet()} updated: ${filing.companyName} from ${filing.dateFiled}")
+            }
+        }
+    }
+}
+
+suspend fun fixDataExtraction() {
+    val allFilings = Database.getAllFilings("{formType: '10-K'}")
+    counter.set(0)
     runOnComputationThreadPool {
-        allFilings.chunked(150).forEach {
-            it.mapAsync {
-                val filing = it
-                    .withBasicFilingData()
-                    .withExtractedMetrics()
-//                    .withClosestAnnualReportLink()
-//                    .withYearToYearDiffs()
+        allFilings.forEachAsync {
+            it.consumeEach {
+                val filing =
+                    it
+                        //.copy(dataExtractionStatus = OperationStatus.PENDING)
+//                        .withTicker()
+//                        .withBasicFilingData()
+                        .withExtractedMetrics()
                 val result = Database.filings.replaceOne(filing)
                 if (!result.wasAcknowledged()) {
-                    println("failed to update: $result")
+                    println("${counter.incrementAndGet()} failed to update: $result")
                 } else {
-                    println("updated: ${filing.companyName} from ${filing.dateFiled}")
+                    println("${counter.incrementAndGet()} updated: ${filing.companyName} from ${filing.dateFiled}")
                 }
-            }.awaitAll()
+            }
         }
     }
 }

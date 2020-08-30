@@ -12,7 +12,9 @@ import org.litote.kmongo.exclude
 import org.litote.kmongo.fields
 import org.litote.kmongo.reactivestreams.KMongo
 import org.litote.kmongo.regex
+import strikt.api.expectThat
 import java.io.File
+import java.nio.charset.StandardCharsets
 import java.time.LocalDate
 import kotlin.system.measureTimeMillis
 import kotlin.test.assertTrue
@@ -172,6 +174,28 @@ class ReportTest {
                     .toList()
             }
         })
+    }
+
+    @Test
+    fun calculateAdjustmentsToReconcileNetIncomeToCashflowWallmart2019() {
+        runBlocking {
+            Database.filings.findOne("{dataUrl: 'https://www.sec.gov/Archives/edgar/data/104169/000010416919000016'}")?.let {
+                val calculateReconciliationValues = calculateReconciliationValues(it)
+            }
+        }
+    }
+
+    @Test
+    fun parsesOutAllRelevantProperties() {
+        runBlocking {
+            Database.filings.findOne("{dataUrl: 'https://www.sec.gov/Archives/edgar/data/1775098/000177509820000006'}")?.let {
+                it.files?.xbrlData(it.dataUrl!!)?.let {
+                    val extractData = Report(it.byteInputStream(StandardCharsets.UTF_8), "10-K", true)
+                        .extractData(LocalDate.of(2013, 4, 1).atStartOfDay())
+                    assertTrue { extractData.data.find { it.descriptor.id.contains("dei:DocumentFiscalYearFocus") } != null }
+                }
+            }
+        }
     }
 
 

@@ -1,201 +1,296 @@
 package fi.avp.edgar
 
+import com.github.michaelbull.retry.retry
+import fi.avp.util.forEachAsync
+import fi.avp.util.runOnComputationThreadPool
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.Contextual
+import kotlinx.serialization.Serializable
+import org.bson.types.ObjectId
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 import org.jsoup.parser.Parser
-import org.w3c.dom.Document
-import java.io.BufferedReader
-import java.io.InputStream
+import org.litote.kmongo.eq
+import java.lang.Exception
 import java.nio.charset.StandardCharsets
-import javax.xml.crypto.Data
-import javax.xml.parsers.DocumentBuilderFactory
-import javax.xml.xpath.XPath
-import javax.xml.xpath.XPathFactory
-import kotlin.system.measureTimeMillis
+import java.util.concurrent.atomic.AtomicInteger
+import kotlin.math.absoluteValue
 
-val propertyPattern = Regex(".*_(.+),")
-
-data class Column(
-    val id: String,
-    val labels: Set<String>
+@Serializable
+data class CondensedReport(
+    @Contextual
+    var _id: ObjectId? = null,
+    @Contextual
+    val filingId: ObjectId,
+    val dataUrl: String,
+    val columns: List<Column> = emptyList(),
+    val sections: List<Section> = emptyList(),
+    val status: OperationStatus = OperationStatus.PENDING
 )
 
+@Serializable
+data class Column(
+    val id: String,
+    val timespan: String,
+    val label: String
+)
+
+@Serializable
 data class Value(
     val value: String,
     val columnId: String
 )
 
+@Serializable
 data class Section(
     val id: String,
+    val label: String,
     val rows: MutableSet<Row> = hashSetOf()
 )
 
+@Serializable
 data class Row(
     val propertyId: String,
     val label: String,
     val values: List<Value> = emptyList()
 )
 
+val props = setOf(
+    "us-gaap:DepreciationAndAmortizationAbstract",
+    "us-gaap:AdjustmentsForNoncashItemsIncludedInIncomeLossFromContinuingOperationsAbstract",
+    "us-gaap:AdjustmentsToReconcileNetIncomeLossToCashProvidedByUsedInOperatingActivitiesAbstract",
+    "us-gaap:AdjustmentsNoncashItemsToReconcileNetIncomeLossToCashProvidedByUsedInOperatingActivitiesAbstract",
+    "us-gaap:AdjustmentsToReconcileIncomeLossToNetCashProvidedByUsedInContinuingOperationsAbstract",
+    "fds:AdjustmentsToReconcileNetIncomeToNetCashProvidedByOperatingActivitiesAbstract",
+    "logl:AdjustmentsToReconcileNetLossToCashFlowsFromOperatingActivitiesAbstract",
+    "ReconciliationOfNetIncomeToNetCashProvidedByOperatingActivitiesAbstract")
+
 fun main() {
     runBlocking {
-        Database.filings.find("{ticker: 'AAPL'}").consumeEach {
-            it.files?.cashFlow(it.dataUrl!!)?.let { cashflow ->
-                val xml = cashflow.replace("<link rel=\"StyleSheet\" type=\"text/css\" href=\"report.css\">", "")
-                    .replace("'", "")
-                    .replace("<br>", "")
+        runOnComputationThreadPool {
+            parseCashflowStatements()
+        }
+    }
+}
 
-                try {
-                    println(it.files?.xbrlReport)
-                    val document = Jsoup.parse(xml, StandardCharsets.UTF_8.name(), Parser.xmlParser())
-                    val columnsNode = document.select("Columns")
-                    if (columnsNode.size > 0) {
-                        val columns = columnsNode.select("Column").toList()
-                        val parsedColumnInfo = columns.map {
-                            Column(
-                                id = it.selectFirst("Id").text(),
-                                labels = it
-                                    .select("Labels")
-                                    .select("Label")
-                                    .map {
-                                        it.attr("Label")
-                                    }.toSet())
-                        }.toList()
+val negativeEntryPattern = Regex("\\(.+\\)")
+val cashIncomePattern = Regex("adjustment.*reconcile", RegexOption.IGNORE_CASE)
+val cashIncomePatternAlt = Regex("reconciliation.*income", RegexOption.IGNORE_CASE)
+val cashIncomePatternAlt2 = Regex("adjustments.*continuing", RegexOption.IGNORE_CASE)
+suspend fun calculateReconciliationValues(filing: Filing): Double? {
+    Database.cashflow.ensureIndex(CondensedReport::filingId)
+    return Database.cashflow.findOne(CondensedReport::filingId eq filing._id)?.let { condensedCashflowStatement ->
+        val section = condensedCashflowStatement.sections.find {
+            props.contains(it.id) ||
+            cashIncomePattern.containsMatchIn(it.id) ||
+            cashIncomePatternAlt.containsMatchIn(it.id) ||
+            cashIncomePatternAlt.containsMatchIn(it.id)
+        }
 
-                        val sections = ArrayList<Section>()
-                        var currentSection: Section? = null
-                        document.select("Rows").select("Row").map { row ->
-                            val propertyId = row.select("ElementName").text().replace("_", ":")
-                            val isSectionRow = row.select("IsAbstractGroupTitle").text().toBoolean()
-                            val label = row.select("Label").text()
-
-                            if (isSectionRow) {
-                                val newSection = Section(propertyId)
-                                sections.add(newSection)
-                                currentSection = newSection
-                            } else {
-                                if (currentSection == null) {
-                                    val defaultSection = Section("")
-                                    sections.add(defaultSection)
-                                    currentSection = defaultSection
+        val firstColumnId = condensedCashflowStatement.columns.firstOrNull()?.id
+        if (section != null) {
+            filing.extractedData?.let { extractedData ->
+                val relatedPropertyList = section.rows
+                    .mapNotNull {row ->
+                        row.values.find { it.columnId == firstColumnId }?.let { valueFromCashflowStatement ->
+                            if (valueFromCashflowStatement.value != "0" && !valueFromCashflowStatement.value.isBlank()) {
+                                val value = extractedData.find {it.propertyId == row.propertyId.removePrefix("us-gaap:") }
+                                if (value == null) {
+                                    println("Failed to resolve ${row.propertyId} in ${condensedCashflowStatement.dataUrl}")
                                 }
 
-                                val values = row.select("Cells").select("Cell").map { cell ->
-                                    Value(
-                                        value = cell.select("RoundedNumericAmount").text(),
-                                        columnId = cell.select("Id").text())
-                                }.toList()
-
-                                currentSection!!.rows.add(Row(propertyId, label, values))
-                            }
+                                value?.numericValue()?.let {
+                                    if (negativeEntryPattern.matches(valueFromCashflowStatement.value)) {
+                                        -it.absoluteValue
+                                    } else {
+                                        it.absoluteValue
+                                    }
+                                }
+                            } else null
                         }
-
-                        println(sections)
-                    } else {
-                        val rows = document.select("tr")
-                            .map {
-
-                            }
 
                     }
 
-//                    println(parsed.extract())
+                if (relatedPropertyList.contains(null)) {
+                    null
+                } else {
+                    if (relatedPropertyList.sum().isNaN()) {
+                        println("Result is not a number")
+                    }
+
+                    relatedPropertyList.sum()
+                }
+            }
+        } else {
+            println("${condensedCashflowStatement.dataUrl} No reconciliation data found ${condensedCashflowStatement.sections.map { it.id }}")
+            null
+        }
+    }
+}
+
+suspend fun parseCashflowStatements() {
+    Database.cashflow.ensureIndex("{dataUrl: 1}")
+    val counter = AtomicInteger(0)
+    Database.getAllFilings("{formType: '10-K'}").forEachAsync { cursor ->
+        cursor.consumeEach {filing ->
+            coroutineScope {
+                println(counter.incrementAndGet())
+                try {
+                    retry {
+                        filing.files?.cashFlow(filing.dataUrl!!)?.let { cashflow ->
+                            val dataUrl = "${filing.dataUrl!!}/${filing.files?.cashFlow}"
+////
+//                            if (Database.cashflow.findOne("{dataUrl: '${dataUrl}'}") != null) {
+//                                println("${dataUrl} is already parsed")
+//                                return@let
+//                            }
+
+                            val sections = ArrayList<Section>()
+                            var currentSection: Section? = null
+
+                            fun updateCurrentSection(propertyId: String, label: String, isSectionProperty: Boolean): Section? {
+                                val newSection = Section(propertyId, label)
+                                if (isSectionProperty) {
+                                    sections.add(newSection)
+                                    currentSection = newSection
+                                } else {
+                                    if (currentSection == null) {
+                                        val defaultSection = Section("", "")
+                                        sections.add(defaultSection)
+                                        currentSection = defaultSection
+                                    }
+                                }
+                                return currentSection
+                            }
+
+
+                            val xml = cashflow.replace("<link rel=\"StyleSheet\" type=\"text/css\" href=\"report.css\">", "")
+                                .replace("'", "")
+                                .replace("<br>", "")
+
+                            try {
+                                val document = Jsoup.parse(xml, StandardCharsets.UTF_8.name(), Parser.xmlParser())
+                                val columnsNode = document.select("Columns")
+                                val report = if (columnsNode.size > 0) {
+                                    val columns = columnsNode.select("Column").toList()
+                                    val parsedColumnInfo = columns.map {
+                                        val labels = it.select("Labels > Label").map { it.attr("Label") }.toList()
+                                        val timespan = if (labels.size > 1) labels[0] else ""
+                                        val label = if (labels.size > 1) labels[1] else labels[0]
+                                        Column(
+                                            id = it.selectFirst("Id").text(),
+                                            label = label,
+                                            timespan = timespan)
+                                    }.toList()
+
+                                    document.select("Rows").select("Row").map { row ->
+                                        val propertyId = row.select("ElementName").text().replace("_", ":")
+                                        val isSectionRow = row.select("IsAbstractGroupTitle").text().toBoolean()
+                                        val label = row.select("Label").text()
+
+                                        currentSection = updateCurrentSection(propertyId, label, isSectionRow)
+
+                                        if (!isSectionRow) {
+                                            val values = row.select("Cells").select("Cell").map { cell ->
+                                                Value(
+                                                    value = cell.select("RoundedNumericAmount").text(),
+                                                    columnId = cell.select("Id").text())
+                                            }.toList()
+
+                                            currentSection!!.rows.add(Row(propertyId, label, values))
+                                        }
+                                    }
+
+                                    CondensedReport(columns = parsedColumnInfo, sections = sections, filingId = filing._id!!, dataUrl = dataUrl, status = OperationStatus.DONE)
+                                } else {
+                                    fun resolvePropertyInformation(row: Element): Pair<String, String>? {
+                                        return row.selectFirst("td > a[onclick]")?.let { cellWithPropertyId ->
+                                            cellWithPropertyId.attr("onclick").let {
+                                                val propertyId = Regex("defref_(.+),")
+                                                    .find(it)
+                                                    ?.groups
+                                                    ?.get(1)
+                                                    ?.value
+                                                propertyId?.let {pid ->
+                                                    pid.replace("_", ":") to cellWithPropertyId.text()
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    val headers = document.select("th[colspan]:gt(0)")
+                                    val spans: List<String> = headers.fold(emptyList()) { result, td ->
+                                        val colSpan = td.attr("colspan").toInt()
+                                        val spanText = td.text()
+                                        result.plus((0 until colSpan).map { spanText }.toList())
+                                    }
+
+                                    val cols = document.select("tr:eq(1) > th")
+                                        .mapIndexed { index, th ->
+                                            Column(
+                                                id = "$index",
+                                                label = th.select("div").text(),
+                                                timespan = spans[index])
+                                        }
+
+                                    document.select("body > table > tr")
+                                        .drop(2)
+                                        .forEach { row ->
+                                            val propertyInformation = resolvePropertyInformation(row)
+                                            if (propertyInformation == null) {
+                                                sections.add(Section(
+                                                    id = row.selectFirst("td").text(),
+                                                    label = row.selectFirst("td").text(),
+                                                ))
+                                            } else {
+                                                propertyInformation.let { (propertyId, label) ->
+                                                    val isSectionProperty = propertyId.endsWith("Abstract")
+                                                    currentSection = updateCurrentSection(propertyId, label, isSectionProperty)
+
+                                                    if (!isSectionProperty) {
+                                                        val values = row.select("td:gt(0)")
+                                                            .filter { it.attr("class") != "fn"}
+                                                            // skip property id
+                                                            .mapIndexed { index, cell ->
+                                                                Value(
+                                                                    value = cell.text(),
+                                                                    columnId = index.toString())
+                                                            }.toList()
+
+                                                        currentSection!!.rows.add(Row(propertyId, label, values))
+                                                    }
+                                                }
+                                            }
+                                        }
+
+
+                                    CondensedReport(
+                                        columns = cols,
+                                        sections = sections,
+                                        filingId = filing._id!!,
+                                        dataUrl = dataUrl,
+                                        status = OperationStatus.DONE)
+                                }
+
+                                Database.cashflow.save(report)
+                            } catch (e: Exception) {
+                                Database.cashflow.save(CondensedReport(
+                                    filingId = filing._id!!,
+                                    dataUrl = dataUrl,
+                                    status = OperationStatus.FAILED))
+                                println("failed to parse ${dataUrl} due to ${e.message}")
+                            }
+                        }
+                    }
                 } catch (e: Exception) {
-
+                    println("failed to parse open cashflow file")
+                    Database.cashflow.save(CondensedReport(
+                        filingId = filing._id!!,
+                        dataUrl = "",
+                        status = OperationStatus.FAILED))
                 }
             }
         }
     }
-}
-
-suspend fun calcNonPaperCashflow() {
-    Database.getSP500Companies().forEach {
-        val companyInfo = it
-        val doneIn = measureTimeMillis {
-            val filings =
-                it.cik.flatMap {
-                    runBlocking {
-                        Database.getFilingsByCik(it.toString())
-                    }
-                }.filter { it.formType == "10-K" }
-
-            val reportData = getCompanyReports(it.primaryTicker)
-
-            filings.forEach {
-                extractCashflowReconciliationData(it, companyInfo, reportData)
-            }
-        }
-    }
-}
-
-private fun extractCashflowReconciliationData(filing: Filing, companyInfo: CompanyInfo, reportData: Map<String, InputStream>) {
-    val cashFlowStatment = filing.files?.cashFlow
-    if (cashFlowStatment == null) {
-        println("${companyInfo.primaryTicker} ${filing.dateFiled} ${filing.dataUrl}")
-    }
-
-    cashFlowStatment?.let {
-        try {
-            val cashflowFileName = "cashflow-${filing.files!!.xbrlReport!!}"
-            val content = reportData[cashflowFileName]
-            content?.let {
-                val xml = BufferedReader(it.reader(StandardCharsets.UTF_8))
-                    .readText()
-                    .replace("<link rel=\"stylesheet\" type=\"text/css\" href=\"report.css\">", "")
-                    .replace("'", "")
-                    .replace("<br>", "")
-
-                val parsedHtml = Jsoup.parse(xml)
-
-                val attrId = "gaap_AdjustmentsToReconcileNetIncomeLossToCashProvidedByUsedInOperatingActivitiesAbstract"
-                val reconciliationNode: Element? = parsedHtml.selectFirst("tr > td > a[onclick*='$attrId']")
-                reconciliationNode?.parents()?.find { it.`is`("tr") }?.let {
-                    val allRows = generateSequence(it.nextElementSibling()) { it.nextElementSibling() }
-                        .map {
-                            val propertyLink = it.selectFirst("td > a")
-                            propertyPattern.find(propertyLink.attr("onclick"))
-                                ?.groups
-                                ?.let {
-                                    it[1]?.value
-                                } ?: ""
-                        }
-                        .filter { it.isNotEmpty() }
-                        .takeWhile { !it.contains("Abstract") }
-                        .toList()
-                    val reconciliationValues = allRows.map { propertyId ->
-                        propertyId to filing.extractedData?.find { it.propertyId.substringAfterLast(":") == propertyId }?.value
-                    }
-                    reconciliationValues
-                }
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-}
-
-class Cashflow(val content: InputStream) {
-    fun extract(): Any? {
-        val expr =
-            "//*[contains(@onclick, 'gaap_AdjustmentsToReconcileNetIncomeLossToCashProvidedByUsedInOperatingActivitiesAbstract')]"
-        return xpath.compile(expr).evaluate(reportDoc)
-    }
-
-    private val xpath: XPath by lazy {
-        XPathFactory.newInstance().newXPath()
-    }
-
-    private val reportDoc: Document by lazy {
-        val builderFactory = DocumentBuilderFactory.newInstance()
-        builderFactory.isNamespaceAware = true
-
-        val builder = builderFactory.newDocumentBuilder()
-        try {
-            builder.parse(content)
-        } catch (e: Exception) {
-            e.printStackTrace()
-            throw RuntimeException(e)
-        }
-    }
-
 }

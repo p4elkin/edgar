@@ -6,16 +6,34 @@ import fi.avp.util.runOnComputationThreadPool
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.channels.ticker
+import kotlinx.coroutines.coroutineScope
+import kotlinx.serialization.Serializable
 import me.moallemi.tools.daterange.localdate.LocalDateRange
 import org.litote.kmongo.coroutine.coroutine
 import org.litote.kmongo.reactivestreams.KMongo
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import me.moallemi.tools.daterange.localdate.rangeTo
+import org.bson.conversions.Bson
 import org.litote.kmongo.*
+import org.litote.kmongo.coroutine.CoroutineFindPublisher
+import org.litote.kmongo.util.KMongoUtil
 import java.time.temporal.ChronoUnit
-import kotlin.time.measureTimedValue
 
+
+
+@Serializable
+data class CompanyInfo(
+    val _id: String? = null,
+    val primaryTicker: String,
+    val tickers: Set<String> = emptySet(),
+    val isInSP500: Boolean = false,
+    val cik: Set<Int>,
+    val names: Set<String>,
+    val description: String = "",
+    val exchange: String = "",
+    val sic: Int = -1)
 
 object Database {
 
@@ -37,6 +55,7 @@ object Database {
 
     val database = asyncClient.getDatabase("sec-report") //normal java driver usage
     val filings = database.getCollection<Filing>("filings")
+    val cashflow = database.getCollection<CondensedReport>("cashflow")
 
     private val companyList = GlobalScope.async {  database.getCollection<CompanyInfo>("company-list")
         .find()
@@ -44,25 +63,65 @@ object Database {
         .toList()
     }
 
-    suspend fun getAllFilings(): List<Filing>  {
+    suspend fun getAllFilings(): List<CoroutineFindPublisher<Filing>>  {
+        return getAllFilings(bsonFilter = null)
+    }
+
+    suspend fun getAllFilings(bsonFilter: Bson? = null): List<CoroutineFindPublisher<Filing>>  {
         return DateRange()
             .reversed()
             .chunked(4)
             .mapAsync {
                 runOnComputationThreadPool {
-                    it.flatMap {
-                        val (filings, time) = measureTimedValue {
-                            filings
-                                .find(and(Filing::dateFiled gt it.start, Filing::dateFiled lt it.endInclusive))
-                                .projection(fields(exclude(Filing::extractedData)))
-                                .toList()
-                        }
-                        println("Fetched ${filings.size} filings between ${it.start} and ${it.endInclusive} on ${Thread.currentThread().name} in $time")
-                        filings
+                    it.map {
+                        val result =
+                            filings.find(
+                                and(
+                                    Filing::dateFiled gt it.start,
+                                    Filing::dateFiled lte it.endInclusive,
+                                    bsonFilter))
+//                                .projection(fields(exclude(Filing::extractedData)))
+                        result
                     }
                 }
             }.awaitAll()
             .flatten()
+    }
+
+    data class LiveCompanies(
+        val cik: List<Long>,
+        val tickers: List<String>,
+        val names: List<String>) {
+        fun contain(filing: Filing): Boolean {
+            return cik.contains(filing.cik) || tickers.contains(filing.ticker) || names.contains(filing.companyName)
+        }
+    }
+
+    suspend fun getLiveCompanies() = coroutineScope {
+        val cik = async { getExistingCompanyCikList() }
+        val ticker = async { getExistingCompanyTickerList() }
+        val names = async { getExistingCompanyNameList() }
+
+        LiveCompanies(
+            cik = cik.await(),
+            tickers = ticker.await(),
+            names = names.await())
+    }
+
+    suspend fun getExistingCompanyCikList(): List<Long> {
+        return filings.distinct<Long>("cik", "{formType: '10-K', fiscalYear: 2019}").toList()
+    }
+
+    suspend fun getExistingCompanyTickerList(): List<String> {
+        return filings.distinct<String>("ticker", "{formType: '10-K', fiscalYear: 2019}").toList()
+    }
+
+    suspend fun getExistingCompanyNameList(): List<String> {
+        return filings.distinct<String>("ticker", "{formType: '10-K', fiscalYear: 2019}").toList()
+    }
+
+    suspend fun getAllFilings(filter: String? = null): List<CoroutineFindPublisher<Filing>>  {
+        return getAllFilings(filter?.let {KMongoUtil.toBson(it)})
     }
 
     suspend fun getCompanyList(): List<CompanyInfo> {

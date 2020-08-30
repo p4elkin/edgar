@@ -41,8 +41,8 @@ fun valueInMillions(value: Double?): Double {
 
 open class NumberExtractor(val variants: Set<String>) {
 
-    fun get(report: Filing): Double? {
-        return report.extractedData?.find {
+    fun get(filing: Filing): Double? {
+        return filing.extractedData?.find {
             it.propertyId in variants
         }?.numericValue()
     }
@@ -92,6 +92,8 @@ object Liabilities: MetricExtractor(
     }
 }
 
+
+
 object OperatingCashFlow: MetricExtractor(
     variants = setOf(
         "NetCashProvidedByUsedInOperatingActivities",
@@ -100,6 +102,7 @@ object OperatingCashFlow: MetricExtractor(
     compoundVariants = emptySet())
 
 object FiscalYearExtractor: NumberExtractor(setOf("dei:DocumentFiscalYearFocus"))
+object SharesOutstandingExtractor: NumberExtractor(setOf("dei:EntityCommonStockSharesOutstanding", "CommonStockSharesAuthorized"))
 
 open class MetricExtractor(val variants: Set<String>, val primaryVariants: Set<String>, val compoundVariants: Set<String>) {
 
@@ -192,6 +195,8 @@ object Assets: MetricExtractor(
 
 object Revenue: MetricExtractor(
     variants = setOf(
+        "RevenuesExcludingInterestAndDividends",
+        "HealthCareOrganizationRevenue",
         "Revenues",
         "SalesRevenueNet",
         "SegmentReportingInformationRevenue",

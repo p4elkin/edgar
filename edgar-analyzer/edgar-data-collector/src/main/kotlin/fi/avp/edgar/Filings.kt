@@ -47,8 +47,21 @@ suspend fun Filing.getPreviousYearFiling(): Filing? {
         .first()
 }
 
+val reportPattern = Regex("^(.+)-.+")
 suspend fun Filing.withTicker(): Filing {
-    return copy(ticker = Database.getCompanyList().find { it.cik.contains(cik!!.toInt()) }?.primaryTicker)
+    val resolveTickerFromReportFileName: suspend () -> String? = {
+        this.withFiles().files?.xbrlReport?.let {
+            reportPattern.find(it)?.let { reportFileNameMatchResult ->
+                reportFileNameMatchResult.groups[1]!!.value
+            }
+        }
+    }
+
+    val ticker = Database.getCompanyList().find { it.cik.contains(cik!!.toInt()) }
+        ?.primaryTicker
+        ?: resolveTickerFromReportFileName()
+
+    return copy(ticker = ticker)
 }
 
 suspend fun Filing.withFiles(): Filing {
@@ -65,7 +78,8 @@ suspend fun Filing.withFiles(): Filing {
 
 suspend fun Filing.withExtractedMetrics(): Filing {
     return withBasicFilingData().copy(
-        equity = Assets.get(this),
+        cashIncome = calculateReconciliationValues(this),
+        equity = Equity.get(this),
         assets = Assets.get(this),
         revenue = Revenue.get(this),
         eps = Eps.get(this),
@@ -74,7 +88,8 @@ suspend fun Filing.withExtractedMetrics(): Filing {
         financingCashFlow = FinancingCashFlow.get(this),
         investingCashFlow = InvestingCashFlow.get(this),
         netIncome = NetIncome.get(this),
-        fiscalYear = FiscalYearExtractor.get(this)?.toLong()
+        fiscalYear = FiscalYearExtractor.get(this)?.toLong(),
+        sharesOutstanding = SharesOutstandingExtractor.get(this)?.toLong()
     )
 }
 

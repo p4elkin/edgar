@@ -14,6 +14,7 @@ import java.time.format.DateTimeParseException
 import javax.xml.parsers.DocumentBuilderFactory
 import javax.xml.xpath.XPath
 import javax.xml.xpath.XPathConstants
+import javax.xml.xpath.XPathExpression
 import javax.xml.xpath.XPathFactory
 import kotlin.math.abs
 
@@ -38,7 +39,7 @@ open class Report(val content: InputStream, private val reportType: String, priv
         }
 
     fun extractData(date: LocalDateTime): ReportDataExtractionResult {
-        // after resolving some basic properties - detect
+        // after resolving some basic properties - detect those that are specified only in one context
         fun getNonAmbiguousContexts(props: List<PropertyData>): Set<String> {
             return props.filter {
                 it.extractedValues
@@ -51,6 +52,7 @@ open class Report(val content: InputStream, private val reportType: String, priv
 
         fun resolveProperty(propertyDescriptor: PropertyDescriptor): PropertyData {
 
+            // between several extracted values choose one that is closest to report date
             fun filterByReportPeriodProximity(nodes: List<ExtractedValue>): List<ExtractedValue> {
                 val closestToReportDate =  nodes.groupBy {
                     val endDate= contextById(it.context)?.period?.endDate?.atStartOfDay() ?: date;
@@ -66,7 +68,7 @@ open class Report(val content: InputStream, private val reportType: String, priv
                 return closestToReportDate.groupBy {
                     val duration = contextById(it.context)?.period?.duration ?: 0
                     if (reportType == "10-Q") kotlin.math.abs(90 - duration) else kotlin.math.abs(365 - duration)
-                }.minBy {
+                }.minByOrNull {
                     it.key
                 }?.value ?: emptyList()
             }
@@ -83,15 +85,14 @@ open class Report(val content: InputStream, private val reportType: String, priv
                     .map { contextById(it.context)!! }
                     .toSet(),
 
-                actualisedMetrics
-                    .map { it.unit }
-                    .filterNotNull()
+                actualisedMetrics.mapNotNull
+                    { it.unit }
                     .map { unitById(it)!! }
                     .toSet()
             )
         }
 
-        val resolvedBasicProperties = attrNames.map { resolveProperty(it) }.plus(resolveDei())
+        val resolvedBasicProperties = attrNames.map { resolveProperty(it) }
 
         val allContexts = resolvedBasicProperties
             .flatMap { it.contexts }
@@ -105,15 +106,17 @@ open class Report(val content: InputStream, private val reportType: String, priv
         }.toSet()
 
         val problems = sanitiseExtractedData(relevantContexts, reportType, disambiguatedBasicProperties)
-        val data = relevantContexts.filter { it.id !in problems.suspiciousContexts }.flatMap {
+        val props = relevantContexts.filter { it.id !in problems.suspiciousContexts }.flatMap {
             extractAllPropertiesForContext(it.id)
-        }.map {
+        }
+
+        val data = props.map {
             PropertyData(
                 PropertyDescriptor(variants = listOf(it.propertyId), id = it.propertyId, category = "misc"),
                 extractedValues = listOf(it),
                 contexts = setOf(allContexts[it.context]!!),
                 valueUnits = it.unit?.let { setOf(unitById(it)!!) })
-        }
+        }.plus(resolveDei())
 
         return ReportDataExtractionResult(data, problems)
     }
@@ -143,11 +146,15 @@ open class Report(val content: InputStream, private val reportType: String, priv
     }
 
     private fun resolveDei(): List<PropertyData> {
-        val deiNodes = xpath.compile("//*[starts-with(name(), 'dei:')]")
-            .evaluate(this.reportDoc, XPathConstants.NODESET) as NodeList
+        val deiNodes = if (isInline)
+        xpathExpression("//*[starts-with(@name, 'dei:')]")
+                .evaluate(this.reportDoc, XPathConstants.NODESET) as NodeList
+        else
+            xpathExpression("//*[starts-with(name(), 'dei:')]")
+                .evaluate(this.reportDoc, XPathConstants.NODESET) as NodeList
 
         return deiNodes.list()
-            .map { extractValue(it, it.nodeName) }
+            .map { extractValue(it, if (isInline) it.attr("name")!! else it.nodeName) }
             .map {
                 PropertyData(
                     PropertyDescriptor(
@@ -182,9 +189,15 @@ open class Report(val content: InputStream, private val reportType: String, priv
         )
     }
 
+    val compiledXPathCache: MutableMap<String, XPathExpression> = hashMapOf()
+
+    private fun xpathExpression(selector: String): XPathExpression {
+        return compiledXPathCache.computeIfAbsent(selector) { xpath.compile(it) }
+    }
+
     private fun resolveNodesReferencingContext(contextId: String): NodeList {
         val selector = "//*[@contextRef='${contextId}']"
-        return xpath.compile(selector).evaluate(reportDoc, XPathConstants.NODESET) as NodeList
+        return xpathExpression(selector).evaluate(reportDoc, XPathConstants.NODESET) as NodeList
     }
 
     private fun resolveNodes(attrId: String): NodeList {
@@ -194,7 +207,7 @@ open class Report(val content: InputStream, private val reportType: String, priv
         else
             "//*[local-name() = '$idWithoutNamespace']"
 
-        return xpath.compile(selector).evaluate(reportDoc, XPathConstants.NODESET) as NodeList
+        return xpathExpression(selector).evaluate(reportDoc, XPathConstants.NODESET) as NodeList
     }
 
     private fun unitById(id: String): ValueUnit? {
@@ -239,12 +252,12 @@ open class Report(val content: InputStream, private val reportType: String, priv
     }
 
     private fun nodeSet(selector: String): NodeList {
-        return xpath.compile(selector).evaluate(reportDoc, XPathConstants.NODESET) as NodeList
+        return xpathExpression(selector).evaluate(reportDoc, XPathConstants.NODESET) as NodeList
     }
 
 
     private fun singleNode(selector: String): Node? {
-        return xpath.compile(selector).evaluate(reportDoc, XPathConstants.NODE) as Node?
+        return xpathExpression(selector).evaluate(reportDoc, XPathConstants.NODE) as Node?
     }
 
     private fun disambiguateProperties(nonAmbiguousContexts: Set<String>, allContexts: Set<Context>, data: List<PropertyData>): List<PropertyData> {
