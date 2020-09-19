@@ -1,18 +1,14 @@
 package fi.avp.edgar
 
 import com.mongodb.BasicDBObject
-import com.mongodb.DBObject
 import kotlinx.coroutines.runBlocking
 import org.bson.types.ObjectId
 import org.junit.Test
 import org.litote.kmongo.coroutine.coroutine
-import org.litote.kmongo.coroutine.toList
 import org.litote.kmongo.eq
 import org.litote.kmongo.exclude
 import org.litote.kmongo.fields
 import org.litote.kmongo.reactivestreams.KMongo
-import org.litote.kmongo.regex
-import strikt.api.expectThat
 import java.io.File
 import java.nio.charset.StandardCharsets
 import java.time.LocalDate
@@ -30,9 +26,11 @@ class ReportTest {
             "10-Q", false
         ).extractData(LocalDate.of(2015, 3, 31).atStartOfDay())
 
-        assertTrue { extractedData.data
-            .flatMap { it.extractedValues }
-            .filter { it.propertyId.toLowerCase().contains("earningspershare") }.isNotEmpty() }
+        assertTrue {
+            extractedData.data
+                .flatMap { it.extractedValues }
+                .any { it.propertyId.toLowerCase().contains("earningspershare") }
+        }
     }
 
     @Test

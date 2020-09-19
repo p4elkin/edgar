@@ -13,14 +13,21 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Contextual
 import kotlinx.serialization.Serializable
 import org.bson.conversions.Bson
-import org.litote.kmongo.*
+import org.litote.kmongo.and
+import org.litote.kmongo.lt
+import org.springframework.boot.autoconfigure.EnableAutoConfiguration
 import org.springframework.boot.autoconfigure.SpringBootApplication
+import org.springframework.boot.autoconfigure.mongo.MongoAutoConfiguration
+import org.springframework.boot.autoconfigure.mongo.MongoReactiveAutoConfiguration
+import org.springframework.boot.builder.SpringApplicationBuilder
 import org.springframework.boot.runApplication
 import org.springframework.context.annotation.Bean
 import org.springframework.http.MediaType
 import org.springframework.scheduling.annotation.EnableScheduling
 import org.springframework.stereotype.Component
-import org.springframework.web.bind.annotation.*
+import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.RequestParam
+import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.cors.CorsConfiguration
 import org.springframework.web.cors.reactive.CorsWebFilter
 import org.springframework.web.cors.reactive.UrlBasedCorsConfigurationSource
@@ -30,7 +37,7 @@ import java.time.ZoneId
 import java.util.concurrent.Executors
 
 
-@SpringBootApplication
+@SpringBootApplication(exclude = [MongoReactiveAutoConfiguration::class, MongoAutoConfiguration::class])
 @EnableScheduling
 open class SecReportDataApplication {
 
@@ -47,6 +54,7 @@ open class SecReportDataApplication {
                 }
             )
         })
+
 }
 
 fun main(args: Array<String>) {
@@ -167,7 +175,8 @@ class CurrentIndexCrawler {
                     revenueThreshold,
                     until,
                     company
-                ))
+                )
+            )
                 .sort(BasicDBObject("dateFiled", -1))
                 .skip(offset)
                 .limit(limit)

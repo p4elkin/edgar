@@ -21,8 +21,6 @@ import org.litote.kmongo.coroutine.CoroutineFindPublisher
 import org.litote.kmongo.util.KMongoUtil
 import java.time.temporal.ChronoUnit
 
-
-
 @Serializable
 data class CompanyInfo(
     val _id: String? = null,
@@ -51,7 +49,8 @@ object Database {
         override fun iterator(): Iterator<LocalDateRange> = mapped.iterator()
     }
 
-    private val asyncClient = KMongo.createClient().coroutine
+    private val connectionString = System.getenv("address") ?: "mongodb://localhost"
+    private val asyncClient = KMongo.createClient(connectionString).coroutine
 
     val database = asyncClient.getDatabase("sec-report") //normal java driver usage
     val filings = database.getCollection<Filing>("filings")
