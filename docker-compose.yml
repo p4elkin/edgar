@@ -1,0 +1,28 @@
+version: '3.8'
+services:
+    database:
+        image: 'mongo'
+        container_name: 'mongo'
+        volumes:
+            - ../data/mongo:/data/db
+        ports:
+            - 27017-27019:27017-27019
+    endpoint:
+        depends_on:
+            - database
+        image: edgar
+        environment:
+            - address=mongodb://mongo
+        build:
+            context: edgar-analyzer
+        ports:
+            - 8888:8888
+    app:
+        depends_on:
+            - endpoint
+        image: viewer
+        build:
+            context: sec-report-viewer
+        tty: true
+        ports:
+            - 3000:3000
