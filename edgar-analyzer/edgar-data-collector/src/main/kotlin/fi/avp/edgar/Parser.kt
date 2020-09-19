@@ -1,7 +1,7 @@
 package fi.avp.edgar
 
 import com.mongodb.BasicDBObject
-import fi.avp.util.mapAsync
+import fi.avp.edgar.util.mapAsync
 import kotlinx.coroutines.*
 import org.litote.kmongo.coroutine.replaceOne
 

@@ -195,7 +195,9 @@ object Assets: MetricExtractor(
 
 object Revenue: MetricExtractor(
     variants = setOf(
+        "RealEstateRevenueNet",
         "RevenuesExcludingInterestAndDividends",
+        "SalesRevenueServicesGross",
         "HealthCareOrganizationRevenue",
         "Revenues",
         "SalesRevenueNet",

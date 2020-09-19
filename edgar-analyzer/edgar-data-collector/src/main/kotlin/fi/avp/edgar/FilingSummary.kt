@@ -1,7 +1,7 @@
 package fi.avp.edgar
 
-import fi.avp.util.find
-import fi.avp.util.list
+import fi.avp.edgar.util.find
+import fi.avp.edgar.util.list
 import org.w3c.dom.Document
 import org.w3c.dom.NodeList
 import java.io.InputStream

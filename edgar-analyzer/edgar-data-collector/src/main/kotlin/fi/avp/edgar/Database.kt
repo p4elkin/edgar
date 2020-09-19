@@ -1,8 +1,8 @@
 package fi.avp.edgar
 
 import com.mongodb.BasicDBObject
-import fi.avp.util.mapAsync
-import fi.avp.util.runOnComputationThreadPool
+import fi.avp.edgar.util.mapAsync
+import fi.avp.edgar.util.runOnComputationThreadPool
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll

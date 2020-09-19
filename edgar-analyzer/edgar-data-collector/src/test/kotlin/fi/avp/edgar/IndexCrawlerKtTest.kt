@@ -1,7 +1,7 @@
 package fi.avp.edgar
 
-import fi.avp.util.asyncGetText
-import fi.avp.util.mapAsync
+import fi.avp.edgar.util.asyncGetText
+import fi.avp.edgar.util.mapAsync
 import kotlinx.coroutines.*
 import org.junit.Test
 import org.litote.kmongo.gt

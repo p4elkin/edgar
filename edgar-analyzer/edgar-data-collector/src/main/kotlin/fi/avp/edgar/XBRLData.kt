@@ -1,7 +1,7 @@
 package fi.avp.edgar
 
-import fi.avp.util.getReportData
-import fi.avp.util.getReportDataZip
+import fi.avp.edgar.util.getReportData
+import fi.avp.edgar.util.getReportDataZip
 import java.io.InputStream
 import java.nio.charset.StandardCharsets
 import java.util.*

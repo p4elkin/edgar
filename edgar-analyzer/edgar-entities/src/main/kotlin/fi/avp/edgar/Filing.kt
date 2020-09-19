@@ -4,7 +4,7 @@ import com.github.michaelbull.retry.policy.constantDelay
 import com.github.michaelbull.retry.policy.limitAttempts
 import com.github.michaelbull.retry.policy.plus
 import com.github.michaelbull.retry.retry
-import fi.avp.util.*
+import fi.avp.edgar.util.*
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.Contextual

@@ -3,10 +3,10 @@ package fi.avp.edgar
 import com.github.michaelbull.retry.policy.limitAttempts
 import com.github.michaelbull.retry.retry
 import com.mongodb.BasicDBObject
-import fi.avp.util.asyncGet
-import fi.avp.util.asyncJson
-import fi.avp.util.long
-import fi.avp.util.text
+import fi.avp.edgar.util.asyncGet
+import fi.avp.edgar.util.asyncJson
+import fi.avp.edgar.util.long
+import fi.avp.edgar.util.text
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.coroutineScope

@@ -1,20 +1,29 @@
 package fi.avp.edgar
 
+import com.github.michaelbull.retry.retry
 import com.mongodb.BasicDBObject
-import fi.avp.util.forEachAsync
-import fi.avp.util.mapAsync
-import fi.avp.util.runOnComputationThreadPool
+import com.mongodb.client.result.UpdateResult
+import fi.avp.edgar.util.*
+import jdk.nashorn.internal.objects.NativeArray.forEach
 import kotlinx.coroutines.*
 import kotlinx.serialization.Serializable
 import org.bson.Document
 import org.bson.types.ObjectId
 import org.litote.kmongo.*
 import org.litote.kmongo.coroutine.*
+import java.io.BufferedInputStream
+import java.io.FileOutputStream
 import java.lang.Exception
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
 import java.nio.file.Paths
 import java.time.LocalDate
+import java.time.temporal.ChronoUnit
+import java.time.temporal.Temporal
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 import kotlin.system.measureTimeMillis
 import kotlin.time.measureTimedValue
 
@@ -25,6 +34,7 @@ import kotlin.time.measureTimedValue
  * ticker and aggregates them into a single record.
  */
 suspend fun consolidateCompanyInfo() {
+
     @Serializable
     data class SecCompanyRecord(
         val cik_str: Int,
@@ -122,31 +132,12 @@ suspend fun consolidateCompanyInfo() {
     }
 }
 
-suspend fun findReportsWithMultipleEPS() {
-    val reports = Database.database.getCollection<Filing>("sp500")
-    val allReports = reports
-        .find()
-        .batchSize(10000).toList()
-
-    allReports.filter {
-        (it.extractedData?.filter {
-            it.propertyId == "EarningsPerShareDiluted"
-        }?.size ?: 0) > 1
-    }.forEach {
-        println(it.dataUrl)
-    }
-}
-
 fun main() {
-//    dump10KReportsToCSVRowPerCompany()
-//    dump10KReportsToCSVRowPerFiling()
-//    fixDecimalsInSP500AnnualReports()
-//    consolidateCompanyInfo()
-//    resolveAnnualReportReferencesSince()
     runBlocking {
 //        fixDataExtraction()
 //        resolveCashIncomeForAnnualFilings()
-        dump10KReportsToCSVRowPerFiling()
+//        dump10KReportsToCSVRowPerFiling()
+        sniffSplitData()
     }
 }
 
@@ -209,6 +200,41 @@ fun resolveAnnualReportReferencesSince() {
     }
 
     println(ms)
+}
+
+suspend fun sniffSplitData() {
+    Database.filings.distinct<String>("yfinance").toList()
+            .filter { !Files.exists(Locations.splitData.resolve("$it.zip")) }
+            .chunked(10)
+            .forEach {
+                it.mapAsync { ticker ->
+                    retry {
+                        val date = LocalDate.of(2009, 1, 1)
+                        val start = date.toEpochDay()
+                        val splitRequest = asyncGet("https://query1.finance.yahoo.com/v8/finance/chart/AAPL?period1=$start&period2=1599063147&includePrePost=false&events=div,splits&interval=1d")
+                        if (splitRequest.code != 200) {
+                            println("failed to get split data for $ticker")
+                        } else {
+                            println("got split data for $ticker")
+                            splitRequest.body?.let { body ->
+                                if (Files.exists(Locations.splitData.resolve("$ticker.zip"))) {
+                                    Files.delete(Locations.splitData.resolve("$ticker.zip"))
+                                }
+                                val zip = Files.createFile(Locations.splitData.resolve("$ticker.zip"))
+                                ZipOutputStream(FileOutputStream(zip.toFile()).buffered(1024 * 8)).use { out ->
+                                    BufferedInputStream(body.byteStream()).use { origin ->
+                                        val zipEntry = ZipEntry("split.html")
+                                        out.putNextEntry(zipEntry)
+                                        origin.copyTo(out, 8 * 1024)
+                                    }
+                                }
+                            }
+                            delay(500)
+                        }
+                    }
+                }.awaitAll()
+                delay(1000)
+            }
 }
 
 suspend fun dump10KReportsToCSVRowPerFiling() {
@@ -284,24 +310,30 @@ suspend fun dump10KReportsToCSVRowPerFiling() {
 }
 
 suspend fun resolveFiles() {
-    Database.filings.find("{files: null}").batchSize(10000).toList().chunked(20).forEach {
-        val (download, time) = measureTimedValue {
-            it.mapAsync { it.withFiles() }.awaitAll()
-        }
+    Database.filings.find("{files: null}")
+        .batchSize(10000)
+        .toList()
+        .chunked(20)
+        .forEach {
+            val (download, time) = measureTimedValue {
+                it.mapAsync { it.withFiles() }.awaitAll()
+            }
 
-        println("done in $time")
+            println("done in $time")
 
-        download.forEach { filing ->
-            coroutineScope {
+            download.forEach { filing ->
+                coroutineScope {
                     println("saving ${filing.companyName} -> ${filing.ticker}")
                     val result = Database.filings.replaceOne(filing)
                     if (!result.wasAcknowledged()) {
                         println("failed to update: $result")
                     }
                 }
+            }
         }
-    }
 }
+
+val counter = AtomicInteger(0)
 
 suspend fun resolveFilingTickers() {
     Database.filings.find("{ticker: null}").batchSize(10000).toList().chunked(1000).forEach {
@@ -325,59 +357,13 @@ suspend fun fixDataExtractionStatus() {
     }
 }
 
-suspend fun resolveCashIncomeForAnnualFilings() {
-    val allFilings = Database.getAllFilings("{formType: '10-K'}}")
+suspend fun updateFilingsConcurrently(filter: String = "{formType: '10-K'}}", transform: suspend (Filing) -> UpdateResult) = coroutineScope {
+    val allFilings = Database.getAllFilings(filter)
     counter.set(0)
     runOnComputationThreadPool {
         allFilings.forEachAsync {
             it.consumeEach { filing ->
-                val cashIncome = calculateReconciliationValues(filing)
-                println("Cash income for ${filing.dataUrl}/${filing.files?.cashFlow} is $cashIncome")
-                val updatedFiling = filing.copy(cashIncome = cashIncome)
-                val result = Database.filings.replaceOne(updatedFiling)
-                if (!result.wasAcknowledged()) {
-                    println("${counter.incrementAndGet()} failed to update: $result")
-                } else {
-                    println("${counter.incrementAndGet()} updated: ${updatedFiling.companyName} from ${updatedFiling.dateFiled}")
-                }
-            }
-        }
-    }
-}
-
-val counter = AtomicInteger(0)
-suspend fun resolveAnnualReferencesAndYearToYearDiffs(months: Long) = runOnComputationThreadPool {
-    Database.getAllFilings().mapAsync {
-        it.consumeEach {
-            val filing = it
-//                .withExtractedMetrics()
-                .withClosestAnnualReportLink()
-                .withYearToYearDiffs()
-
-            val result = Database.filings.replaceOne(filing)
-            if (!result.wasAcknowledged()) {
-                println("failed to update: $result")
-            } else {
-
-                println("[${counter.incrementAndGet()} updated: ${filing.companyName} from ${filing.dateFiled}")
-            }
-        }
-    }
-}
-
-suspend fun fixDataExtraction() {
-    val allFilings = Database.getAllFilings("{formType: '10-K'}")
-    counter.set(0)
-    runOnComputationThreadPool {
-        allFilings.forEachAsync {
-            it.consumeEach {
-                val filing =
-                    it
-                        //.copy(dataExtractionStatus = OperationStatus.PENDING)
-//                        .withTicker()
-//                        .withBasicFilingData()
-                        .withExtractedMetrics()
-                val result = Database.filings.replaceOne(filing)
+                val result = transform(filing)
                 if (!result.wasAcknowledged()) {
                     println("${counter.incrementAndGet()} failed to update: $result")
                 } else {
@@ -385,6 +371,32 @@ suspend fun fixDataExtraction() {
                 }
             }
         }
+    }
+}
+
+suspend fun resolveCashIncomeForAnnualFilings() {
+    updateFilingsConcurrently {
+        val cashIncome = calculateReconciliationValues(it)
+        println("Cash income for ${it.dataUrl}/${it.files?.cashFlow} is $cashIncome")
+
+        Database.filings.replaceOne(it.copy(cashIncome = cashIncome))
+    }
+}
+
+suspend fun resolveAnnualReferencesAndYearToYearDiffs(months: Long) =
+    updateFilingsConcurrently {
+        Database.filings.replaceOne(it
+//                .withExtractedMetrics()
+            .withClosestAnnualReportLink()
+            .withYearToYearDiffs())
+    }
+
+suspend fun fixDataExtraction() {
+    updateFilingsConcurrently {
+        Database.filings.replaceOne(it.copy(dataExtractionStatus = OperationStatus.PENDING)
+            .withTicker()
+            .withBasicFilingData()
+            .withExtractedMetrics())
     }
 }
 

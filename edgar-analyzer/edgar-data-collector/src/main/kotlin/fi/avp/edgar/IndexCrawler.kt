@@ -1,7 +1,7 @@
 package fi.avp.edgar
 
 import com.fasterxml.jackson.databind.JsonNode
-import fi.avp.util.*
+import fi.avp.edgar.util.*
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 import okhttp3.Request
