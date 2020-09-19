@@ -1,4 +1,4 @@
-package fi.avp.util
+package fi.avp.edgar.util
 
 import com.fasterxml.jackson.databind.JsonNode
 

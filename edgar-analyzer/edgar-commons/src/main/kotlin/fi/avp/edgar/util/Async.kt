@@ -1,8 +1,7 @@
-package fi.avp.util
+package fi.avp.edgar.util
 
 import kotlinx.coroutines.*
 import java.util.concurrent.Executors
-import java.util.stream.Stream
 
 suspend inline fun <T, R> Iterable<T>.mapAsync(crossinline transform: suspend CoroutineScope.(T) -> R): List<Deferred<R>> = coroutineScope {
     map {

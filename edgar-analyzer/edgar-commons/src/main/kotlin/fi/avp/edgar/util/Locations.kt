@@ -1,6 +1,5 @@
-package fi.avp.util
+package fi.avp.edgar.util
 
-import java.io.BufferedInputStream
 import java.io.File
 import java.io.InputStream
 import java.nio.file.Files
@@ -20,6 +19,8 @@ object Locations {
  val reports: Path = parentDir.resolve("data/reports")
 
  val reportsExtracted: Path = parentDir.resolve("data/reports/extracted")
+
+ val splitData = parentDir.resolve("data/split")
 }
 
 fun getReportData(ticker: String): Map<String, InputStream>? {

@@ -1,4 +1,4 @@
-package fi.avp.util
+package fi.avp.edgar.util
 
 import org.w3c.dom.Node
 import org.w3c.dom.NodeList
