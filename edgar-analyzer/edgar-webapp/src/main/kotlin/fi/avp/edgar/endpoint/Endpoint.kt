@@ -1,10 +1,9 @@
 package fi.avp.edgar.endpoint
 
 import com.mongodb.BasicDBObject
-import com.mongodb.DBObject
 import fi.avp.edgar.*
-import fi.avp.util.asyncGetText
-import fi.avp.util.mapAsync
+import fi.avp.edgar.util.asyncGetText
+import fi.avp.edgar.util.mapAsync
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
@@ -18,11 +17,8 @@ import org.litote.kmongo.*
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.runApplication
 import org.springframework.context.annotation.Bean
-import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
-import org.springframework.http.converter.HttpMessageNotReadableException
 import org.springframework.scheduling.annotation.EnableScheduling
-import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import org.springframework.web.bind.annotation.*
 import org.springframework.web.cors.CorsConfiguration
@@ -153,18 +149,10 @@ class CurrentIndexCrawler {
             )
         }
 
-
-
 //        @GetMapping(value = ["/filingCount"], produces = [])
 //        suspend fun countFilings(@RequestParam until: LocalDate, @RequestParam revenueThreshold: Double, @RequestParam company: String): Long {
 //            return Database.filings.countDocuments(filter(revenueThreshold, until, company))
 //        }
-
-        @ExceptionHandler
-        @ResponseStatus(HttpStatus.BAD_REQUEST)
-        open fun handle(e: HttpMessageNotReadableException) {
-            e.printStackTrace()
-        }
 
         @GetMapping(value = ["/latestFilings"], produces = [MediaType.APPLICATION_JSON_VALUE])
         suspend fun latestReports(

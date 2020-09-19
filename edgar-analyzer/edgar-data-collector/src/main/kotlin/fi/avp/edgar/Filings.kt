@@ -154,7 +154,6 @@ suspend fun Filing.doResolveFiles() = retry(limitAttempts(5)) {
             xbrlZip.body!!.byteStream().use {
                 ZipInputStream(it.buffered()).use { zipInputStream ->
                     generateSequence { zipInputStream.nextEntry }
-                        .takeWhile { it != null }
                         .filter { !reportCandidateBlackList.matches(it.name) }
                         .filter {
                             val reportFileName = it.name
