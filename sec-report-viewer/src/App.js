@@ -17,8 +17,9 @@ const AppWithStateProvider = () => {
   const initState = {
     filter: {
       minRevenue: 1000000000,
-      startDate: new Date().getTime(),
-      company: "aapl",
+      startDate: new Date(2011, 1, 1).getTime(),
+      endDate: new Date().getTime(),
+      company: null,  
       industryCode: null
     }
   };

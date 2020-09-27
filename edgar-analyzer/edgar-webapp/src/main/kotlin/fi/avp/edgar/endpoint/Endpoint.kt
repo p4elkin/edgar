@@ -13,8 +13,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Contextual
 import kotlinx.serialization.Serializable
 import org.bson.conversions.Bson
-import org.litote.kmongo.and
-import org.litote.kmongo.lt
+import org.litote.kmongo.*
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.autoconfigure.mongo.MongoAutoConfiguration
@@ -136,19 +135,28 @@ class CurrentIndexCrawler {
         }
     }
 
+    data class Filter(
+        val startDate: Long?,
+        val endDate: Long?,
+        val company: String?
+    )
+
     @RestController
     open class Endpoint() {
 
-        private fun filter(revenueThreshold: Double, earliestDate: Long?, company: String): Bson {
-            val companyFilter = if (company.isNotBlank()) {
-                BasicDBObject("\$text", BasicDBObject("\$search", company))
-            } else {
-                null
+        private fun localDateFromMillis(millis: Long) =
+            Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).toLocalDate()
+
+
+        private fun filter(filter: Filter): Bson {
+            val companyFilter = filter.company?.let {
+                BasicDBObject("\$text", BasicDBObject("\$search", it))
             }
 
-            val dateFilter = earliestDate?.let {
-                Filing::dateFiled lt Instant.ofEpochMilli(earliestDate).atZone(ZoneId.systemDefault()).toLocalDate()
-            }
+            val dateFilter = and(
+                Filing::dateFiled gte (filter.startDate?.let { localDateFromMillis(it)} ?: LocalDate.of(2011, 1, 1)),
+                Filing::dateFiled lte (filter.endDate?.let { localDateFromMillis(it)} ?: LocalDate.now()))
+
 
             return and(
 //                Filing::latestRevenue gt revenueThreshold,
@@ -163,20 +171,8 @@ class CurrentIndexCrawler {
 //        }
 
         @GetMapping(value = ["/latestFilings"], produces = [MediaType.APPLICATION_JSON_VALUE])
-        suspend fun latestReports(
-            @RequestParam limit: Int,
-            @RequestParam offset: Int,
-            @RequestParam revenueThreshold: Double,
-            @RequestParam(required = false) until: Long?,
-            @RequestParam(required = false, defaultValue = "") company: String
-        ): Flow<FilingDTO> {
-            return Database.filings.find(
-                filter(
-                    revenueThreshold,
-                    until,
-                    company
-                )
-            )
+        suspend fun latestFilings(@RequestParam limit: Int, @RequestParam offset: Int, filter: Filter): Flow<FilingDTO> {
+            return Database.filings.find(filter(filter))
                 .sort(BasicDBObject("dateFiled", -1))
                 .skip(offset)
                 .limit(limit)

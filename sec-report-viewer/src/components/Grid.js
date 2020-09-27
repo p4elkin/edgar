@@ -20,11 +20,16 @@ export const Filings = () => {
             let url = new URL("http://localhost:8888/latestFilings"), params = {
                 limit: pageSize,
                 offset: pageIndex * pageSize,
-                until: filter.startDate,
+                startDate: filter.startDate,
+                endDate: filter.endDate,
                 company: filter.company,
                 revenueThreshold: 1000000000
             };
-            Object.keys(params).forEach(key => url.searchParams.append(key, params[key]))
+
+            Object.keys(params).forEach(key => {
+                if ((params[key] && params[key] !== "") || params[key] === 0) url.searchParams.append(key, params[key])
+            })
+
             let fetchedFilings = await fetch(url);
 
             setData(await fetchedFilings.json());
@@ -34,6 +39,15 @@ export const Filings = () => {
 
     return (<FilingGrid filter={filter} columns={columns} data={data} fetchData={fetchData} loading={loading}/>)
 }
+
+const filterNullQueryParams = params => {
+    return Object.keys(params)
+        .filter(param => params[param])
+        .reduce((res, param) => {
+            res[param] = params[param]
+        }, {})
+}
+
 
 const cellWithTwoValues = (right, left) => {
     return (<>

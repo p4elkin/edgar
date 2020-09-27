@@ -8,21 +8,34 @@ import {DelayInput} from "react-delay-input";
 import FormControlLabel from "@material-ui/core/FormControlLabel";
 import Checkbox from "@material-ui/core/Checkbox";
 
+const DatePicker = ({value, onChange}) => {
+    return (<KeyboardDatePicker
+        margin="normal"
+        id="date-picker-dialog"
+        label="Show filings before"
+        format="MM/dd/yyyy"
+        value={value}
+        onChange={(arg) => onChange(arg)}
+        KeyboardButtonProps={{
+            'aria-label': 'change date',
+        }}
+    />)
+
+}
+
 export const FilterBar = () => {
     const [{filter}, dispatch] = useGlobalState()
     return (<Styles>
             <MuiPickersUtilsProvider utils={DateFnsUtils}>
-                <KeyboardDatePicker
-                    margin="normal"
-                    id="date-picker-dialog"
-                    label="Show filings before"
-                    format="MM/dd/yyyy"
-                    value={filter.startDate}
+                <DatePicker
+                    value={filter.startDate || new Date(2011, 1, 1).getTime()}
                     onChange={(date) => {
                         dispatch({type:'updateFilter', updatedFilter: {...filter, startDate: date.getTime()}})
-                    }}
-                    KeyboardButtonProps={{
-                        'aria-label': 'change date',
+                    }}/>
+                <DatePicker
+                    value={filter.endDate || new Date().getTime()}
+                    onChange={(date) => {
+                        dispatch({type:'updateFilter', updatedFilter: {...filter, endDate: date.getTime()}})
                     }}
                 />
             </MuiPickersUtilsProvider>
