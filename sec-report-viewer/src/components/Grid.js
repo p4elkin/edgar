@@ -17,7 +17,7 @@ export const Filings = () => {
         // Set the loading state
         setLoading(true);
         if (fetchId === fetchIdRef.current) {
-            let url = new URL("http://localhost:8888/latestFilings"), params = {
+            let url = new URL(`http://${window.location.hostname}:8888/latestFilings`), params = {
                 limit: pageSize,
                 offset: pageIndex * pageSize,
                 startDate: filter.startDate,
