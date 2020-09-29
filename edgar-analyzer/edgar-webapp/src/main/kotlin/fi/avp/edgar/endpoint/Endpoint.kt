@@ -3,6 +3,7 @@ package fi.avp.edgar.endpoint
 import com.mongodb.BasicDBObject
 import fi.avp.edgar.*
 import fi.avp.edgar.util.asyncGetText
+import fi.avp.edgar.util.forEachAsync
 import fi.avp.edgar.util.mapAsync
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.awaitAll
@@ -14,6 +15,7 @@ import kotlinx.serialization.Contextual
 import kotlinx.serialization.Serializable
 import org.bson.conversions.Bson
 import org.litote.kmongo.*
+import org.litote.kmongo.coroutine.replaceOne
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.autoconfigure.mongo.MongoAutoConfiguration
@@ -23,6 +25,7 @@ import org.springframework.boot.runApplication
 import org.springframework.context.annotation.Bean
 import org.springframework.http.MediaType
 import org.springframework.scheduling.annotation.EnableScheduling
+import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RequestParam
@@ -113,25 +116,36 @@ data class FilingDTO(
 @Component
 class CurrentIndexCrawler {
 
-//    @Scheduled(fixedRate = 24 * 60 * 60 * 1000)
+    @Scheduled(fixedRate = 24 * 60 * 60 * 1000)
     fun crawl() {
         runBlocking(Executors.newFixedThreadPool(8).asCoroutineDispatcher()) {
-            getFilingsAfter(LocalDate.now().minusDays(1))
-                .flatMap {
-                    asyncGetText(it.url)
-                        .split("\n")
-                        .mapNotNull { resolveFilingInfoFromIndexRecord(it) }
-                        .map { Database.tryResolveExisting(it) }
-                }
-                // process filings in batches by two
-                .chunked(5)
-                .forEach {
-                    // resolve everything up to the year to year changes
-                    it.mapAsync { scrapeFilingFacts(it) }
-                        .awaitAll()
-//                        .forEach { Database.filings.replaceOne(it) }
-                    delay(60000)
-                }
+            val newFilings = getFilingsAfter(LocalDate.now().minusDays(2))
+                    .flatMap {
+                        asyncGetText(it.url)
+                                .split("\n")
+                                .map { it }
+                                .mapNotNull { resolveFilingInfoFromIndexRecord(it) }
+//                                .filter { Database.tryResolveExisting(it) != it }
+                    }
+                    // process filings in batches by five
+
+
+            newFilings
+                    .chunked(5)
+                    .forEach {
+                        // resolve everything up to the year to year changes
+                        it.mapAsync { scrapeFilingFacts(it) }
+                                .awaitAll()
+                                .forEachAsync {
+                                    if (it._id != null) {
+                                        Database.filings.replaceOne(it)
+                                    } else {
+                                        Database.filings.save(it)
+                                    }
+                                }
+
+                        delay(5000)
+                    }
         }
     }
 
