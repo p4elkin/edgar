@@ -17,6 +17,8 @@ services:
             context: edgar-analyzer
         ports:
             - 8888:8888
+        volumes:
+            - ./data:/workdir/data
     app:
         depends_on:
             - endpoint

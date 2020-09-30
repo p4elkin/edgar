@@ -26,6 +26,7 @@ RUN mvn -B -e clean install -DskipTests=true
 
 FROM openjdk:14-jdk-alpine
 RUN apk add --no-cache bash
-COPY --from=build /opt/app/edgar-webapp/target/edgar-webapp-1.0-SNAPSHOT.jar ./app.jar
+COPY --from=build /opt/app/edgar-webapp/target/edgar-webapp-1.0-SNAPSHOT.jar ./workdir/app/app.jar
 ENV address mongodb://mongo
+WORKDIR /workdir/app/
 ENTRYPOINT ["/bin/bash", "-c", "java -jar app.jar -Ddb.address=$address -Dspring.profiles.active=production"]
