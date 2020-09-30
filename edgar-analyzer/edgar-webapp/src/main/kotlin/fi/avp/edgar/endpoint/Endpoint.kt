@@ -128,7 +128,7 @@ class CurrentIndexCrawler {
                                 .split("\n")
                                 .map { it }
                                 .mapNotNull { resolveFilingInfoFromIndexRecord(it) }
-                                .filter { Database.tryResolveExisting(it) != it }
+//                                .filter { Database.tryResolveExisting(it) != it }
                     }
                     // process filings in batches by five
 
