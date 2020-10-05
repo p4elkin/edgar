@@ -136,8 +136,8 @@ fun main() {
     runBlocking {
 //        fixDataExtraction()
 //        resolveCashIncomeForAnnualFilings()
-//        dump10KReportsToCSVRowPerFiling()
-        sniffSplitData()
+        dump10KReportsToCSVRowPerFiling()
+//        sniffSplitData()
     }
 }
 
