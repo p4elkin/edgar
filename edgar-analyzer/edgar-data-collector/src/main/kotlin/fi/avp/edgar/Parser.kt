@@ -6,20 +6,24 @@ import kotlinx.coroutines.*
 import org.litote.kmongo.coroutine.replaceOne
 
 suspend fun scrapeFilingFacts(filing: Filing): Filing = coroutineScope {
+    try {
+        if (filing.dataExtractionStatus == OperationStatus.FAILED) {
+            println("Skipping previously failed to be parsed filing ${filing.dataUrl}")
+            return@coroutineScope filing
+        }
 
-    if (filing.dataExtractionStatus == OperationStatus.FAILED) {
-        println("Skipping previously failed to be parsed filing ${filing.dataUrl}")
-        return@coroutineScope filing
+        val filingWithResolvedFiles = filing.withFiles()
+
+        val actualFiling = async { filingWithResolvedFiles.withBasicFilingData() }
+        val annualReportTask = async { filingWithResolvedFiles.getClosestAnnualReport()?.withBasicFilingData() }
+        val previousYearFiling = async { filingWithResolvedFiles.getPreviousYearFiling()?.withBasicFilingData() }
+
+        val withYearToYearDiffs = actualFiling.await().withYearToYearDiffs(previousYearFiling.await())
+        withYearToYearDiffs.withClosestAnnualReportLink(annualReportTask.await())
+    } catch (e: Exception) {
+        println("Failed to parse filing ${filing.dataUrl} due to [${e.message}]")
+        filing
     }
-
-    val filingWithResolvedFiles = filing.withFiles()
-
-    val actualFiling = async { filingWithResolvedFiles.withBasicFilingData() }
-    val annualReportTask = async { filingWithResolvedFiles.getClosestAnnualReport()?.withBasicFilingData() }
-    val previousYearFiling = async { filingWithResolvedFiles.getPreviousYearFiling()?.withBasicFilingData() }
-
-    val withYearToYearDiffs = actualFiling.await().withYearToYearDiffs(previousYearFiling.await())
-    withYearToYearDiffs.withClosestAnnualReportLink(annualReportTask.await())
 }
 
 fun main(args: Array<String>) = runBlocking {
