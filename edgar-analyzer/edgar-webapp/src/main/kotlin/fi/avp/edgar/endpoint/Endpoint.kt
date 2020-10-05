@@ -113,14 +113,12 @@ data class FilingDTO(
     val latestAnnualRevenue: Double
 )
 
-val updatesDone: Long = 0
-
 @Component
 class CurrentIndexCrawler {
 
     @Scheduled(fixedRate = 24 * 60 * 60 * 1000)
     fun crawl() {
-        val daysBack: Long = if (updatesDone > 0) 2 else 40
+        val daysBack: Long = 2
         runBlocking(Executors.newFixedThreadPool(8).asCoroutineDispatcher()) {
             val newFilings = getFilingsAfter(LocalDate.now().minusDays(daysBack))
                     .flatMap {
