@@ -18,8 +18,8 @@ const AppWithStateProvider = () => {
     filter: {
       minRevenue: 1000000000,
       startDate: new Date(2011, 1, 1).getTime(),
-      endDate: new Date().getTime(),
-      company: null,  
+      endDate: new Date().getTime() - 7 * 24 * 60 * 60 * 1000,
+      company: null,
       industryCode: null
     }
   };
