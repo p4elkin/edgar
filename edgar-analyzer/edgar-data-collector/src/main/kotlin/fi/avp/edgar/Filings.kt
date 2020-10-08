@@ -109,11 +109,9 @@ suspend fun Filing.withClosestAnnualReportLink(): Filing = coroutineScope {
 }
 
 suspend fun Filing.withClosestAnnualReportLink(closesAnnualFiling: Filing?): Filing {
-    return withBasicFilingData()?.let {
-        copy(
+    return withBasicFilingData().copy(
             closestYearReportId = closesAnnualFiling?._id,
             latestRevenue = closesAnnualFiling?.revenue?.value)
-    }
 }
 
 suspend fun Filing.withYearToYearDiffs(previous: Filing?): Filing = coroutineScope {

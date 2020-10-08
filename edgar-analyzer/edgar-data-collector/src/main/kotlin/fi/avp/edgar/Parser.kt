@@ -14,7 +14,7 @@ suspend fun scrapeFilingFacts(filing: Filing): Filing = coroutineScope {
 
         val filingWithResolvedFiles = filing.withFiles()
 
-        val actualFiling = async { filingWithResolvedFiles.withBasicFilingData() }
+        val actualFiling = async { filingWithResolvedFiles.withBasicFilingData().withExtractedMetrics() }
         val annualReportTask = async { filingWithResolvedFiles.getClosestAnnualReport()?.withBasicFilingData() }
         val previousYearFiling = async { filingWithResolvedFiles.getPreviousYearFiling()?.withBasicFilingData() }
 

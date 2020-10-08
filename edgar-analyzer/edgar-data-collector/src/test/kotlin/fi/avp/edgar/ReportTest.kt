@@ -198,6 +198,17 @@ class ReportTest {
 
 
     @Test
+    fun extractsActualData() {
+        runBlocking {
+            val filing = Database.filings.findOne("{dataUrl: 'http://www.sec.gov/Archives/edgar/data/94845/000009484520000047'}")
+            val scrapeFilingFacts = scrapeFilingFacts(filing!!)
+            assertTrue { scrapeFilingFacts.extractedData!!.isNotEmpty() }
+
+        }
+    }
+
+
+    @Test
     fun parseValue() {
 //        println(parseValue("101.2", -8.0 ).toBigDecimal().toPlainString())
 //        println(parseValue("4,674,071", -3.0 ).toBigDecimal().toPlainString())
