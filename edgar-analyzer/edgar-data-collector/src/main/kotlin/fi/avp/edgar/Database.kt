@@ -6,7 +6,6 @@ import fi.avp.edgar.util.runOnComputationThreadPool
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.channels.ticker
 import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.Serializable
 import me.moallemi.tools.daterange.localdate.LocalDateRange
@@ -55,6 +54,8 @@ object Database {
     val database = asyncClient.getDatabase("sec-report") //normal java driver usage
     val filings = database.getCollection<Filing>("filings")
     val cashflow = database.getCollection<CondensedReport>("cashflow")
+    val balance = database.getCollection<CondensedReport>("balance")
+    val income = database.getCollection<CondensedReport>("income")
 
     private val companyList = GlobalScope.async {  database.getCollection<CompanyInfo>("company-list")
         .find()
@@ -156,7 +157,7 @@ object Database {
     }
 
     suspend fun tryResolveExisting(stub: Filing): Filing {
-        return filings.findOne("{dataUrl: '${stub.dataUrl}'}") ?: stub
+        return filings.findOne(and(Filing::dataUrl eq stub.dataUrl, Filing::dateFiled eq stub.dateFiled)) ?: stub
     }
 }
 

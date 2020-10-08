@@ -135,7 +135,7 @@ suspend fun consolidateCompanyInfo() {
 fun main() {
     runBlocking {
 //        fixDataExtraction()
-//        resolveCashIncomeForAnnualFilings()
+        resolveCashIncomeForAnnualFilings()
         dump10KReportsToCSVRowPerFiling()
 //        sniffSplitData()
     }
@@ -377,7 +377,9 @@ suspend fun updateFilingsConcurrently(filter: String = "{formType: '10-K'}}", tr
 suspend fun resolveCashIncomeForAnnualFilings() {
     updateFilingsConcurrently {
         val cashIncome = calculateReconciliationValues(it)
-        println("Cash income for ${it.dataUrl}/${it.files?.cashFlow} is $cashIncome")
+        if (cashIncome == Double.NEGATIVE_INFINITY) {
+            println("problem parsing cash income: ${it.dataUrl}/${it.files?.cashFlow} is $cashIncome")
+        }
 
         Database.filings.replaceOne(it.copy(cashIncome = cashIncome))
     }

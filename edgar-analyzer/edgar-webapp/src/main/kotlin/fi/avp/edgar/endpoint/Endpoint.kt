@@ -191,6 +191,6 @@ class CurrentIndexCrawler {
                 .skip(offset)
                 .limit(limit)
                 .toFlow().map { it.toDto() }
-        }
+       }
     }
 }

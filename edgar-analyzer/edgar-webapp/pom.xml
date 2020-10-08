@@ -68,6 +68,11 @@
       <groupId>org.litote.kmongo</groupId>
       <artifactId>kmongo-coroutine</artifactId>
     </dependency>
+    <dependency>
+      <groupId>junit</groupId>
+      <artifactId>junit</artifactId>
+      <scope>test</scope>
+    </dependency>
 
     <dependency>
       <groupId>org.springframework.boot</groupId>
