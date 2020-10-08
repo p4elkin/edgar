@@ -1,5 +1,6 @@
 package fi.avp.edgar.endpoint
 
+import ch.qos.logback.classic.turbo.DynamicThresholdFilter
 import com.mongodb.BasicDBObject
 import fi.avp.edgar.*
 import fi.avp.edgar.util.asyncGetText
@@ -118,7 +119,7 @@ class CurrentIndexCrawler {
 
     @Scheduled(fixedRate = 24 * 60 * 60 * 1000)
     fun crawl() {
-        val daysBack: Long = 40
+        val daysBack: Long = 7
         runBlocking(Executors.newFixedThreadPool(8).asCoroutineDispatcher()) {
             val newFilings = getFilingsAfter(LocalDate.now().minusDays(daysBack))
                     .flatMap {
@@ -126,7 +127,7 @@ class CurrentIndexCrawler {
                                 .split("\n")
                                 .map { it }
                                 .mapNotNull { resolveFilingInfoFromIndexRecord(it) }
-//                                .filter { Database.tryResolveExisting(it) != it }
+                                .map { Database.tryResolveExisting(it) }
                     }
                     // process filings in batches by five
 
@@ -155,7 +156,8 @@ class CurrentIndexCrawler {
     data class Filter(
         val startDate: Long?,
         val endDate: Long?,
-        val company: String?
+        val company: String?,
+        val revenueThreshold: Long = 1000_000_000
     )
 
     @RestController
@@ -176,16 +178,11 @@ class CurrentIndexCrawler {
 
 
             return and(
-//                Filing::latestRevenue gt revenueThreshold,
+                Filing::latestRevenue gt filter.revenueThreshold.toDouble(),
                 dateFilter,
                 companyFilter
             )
         }
-
-//        @GetMapping(value = ["/filingCount"], produces = [])
-//        suspend fun countFilings(@RequestParam until: LocalDate, @RequestParam revenueThreshold: Double, @RequestParam company: String): Long {
-//            return Database.filings.countDocuments(filter(revenueThreshold, until, company))
-//        }
 
         @GetMapping(value = ["/latestFilings"], produces = [MediaType.APPLICATION_JSON_VALUE])
         suspend fun latestFilings(@RequestParam limit: Int, @RequestParam offset: Int, filter: Filter): Flow<FilingDTO> {
