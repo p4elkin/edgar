@@ -1,13 +1,5 @@
 import React, {useEffect, useState} from "react";
-import _ from "lodash";
-
-const toPercents = (value) => {
-    if (value === "NaN") {
-        return "-"
-    }
-
-    return parseFloat(((parseFloat(value) - 1) * 100).toFixed(2))
-};
+import {toPercents} from "../converters";
 
 export const FilingCard = () => {
     const [filings, setFilings] = useState([])

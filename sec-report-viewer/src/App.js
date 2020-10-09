@@ -1,8 +1,9 @@
 import React from "react";
 import "./App.css";
-import {Filings} from "./components/Grid";
+import {Filings} from "./components/Filings";
 import {StateProvider} from "./state";
 import {FilterBar} from "./components/filter";
+import {MissingRevenueList} from "./components/Errors";
 
 function App() {
   return (
@@ -17,8 +18,8 @@ const AppWithStateProvider = () => {
   const initState = {
     filter: {
       minRevenue: 1000000000,
-      startDate: new Date(2011, 1, 1).getTime(),
-      endDate: new Date().getTime() - 7 * 24 * 60 * 60 * 1000,
+      startDate: new Date().getTime() - 7 * 24 * 60 * 60 * 1000,
+      endDate: new Date().getTime(),
       company: null,
       industryCode: null
     }
