@@ -14,7 +14,17 @@ open class CashflowTest {
             }
         }
     }
+    open fun removeSpecialCharacters(value: String?): String? {
+        return value?.replace("[\"[^\\p{IsAlphabetic}\\p{IsDigit}\\p{IsPunctuation}]]".toRegex(), " ")
+                ?.replace("\\\\".toRegex(), "")
+                ?.trim()
+                ?.replace("\\s+".toRegex(), " ")
+    }
 
+    @Test
+    fun regex() {
+        removeSpecialCharacters("test")
+    }
 
     @Test
     fun adskReportTest() {

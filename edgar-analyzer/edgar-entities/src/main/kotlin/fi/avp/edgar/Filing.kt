@@ -6,7 +6,6 @@ import com.github.michaelbull.retry.policy.plus
 import com.github.michaelbull.retry.retry
 import fi.avp.edgar.util.*
 import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.Contextual
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.KSerializer
@@ -229,8 +228,7 @@ data class Filing(
 
         suspend fun getReportZip(url: String): Path {
             suspend fun fetchFiles(): Map<String, String> = retry(limitAttempts(3) + constantDelay(5000)) {
-                listOf(xbrlReport, income, cashFlow, balance)
-                    .filterNotNull()
+                listOfNotNull(xbrlReport, income, cashFlow, balance, operations)
                     .mapAsync { it to asyncGetText("$url/$it") }
                     .awaitAll()
                     .toMap()
@@ -278,6 +276,12 @@ data class Filing(
 
         suspend fun income(dataUrl: String): String? {
             return income?.let {
+                getFileContents(it, dataUrl)
+            }
+        }
+
+        suspend fun operations(dataUrl: String): String? {
+            return operations?.let {
                 getFileContents(it, dataUrl)
             }
         }

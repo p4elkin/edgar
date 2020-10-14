@@ -55,7 +55,11 @@ object Database {
     val filings = database.getCollection<Filing>("filings")
     val cashflow = database.getCollection<CondensedReport>("cashflow")
     val balance = database.getCollection<CondensedReport>("balance")
-    val income = database.getCollection<CondensedReport>("income")
+    val operations = database.getCollection<CondensedReport>("operations")
+
+    init {
+
+    }
 
     private val companyList = GlobalScope.async {  database.getCollection<CompanyInfo>("company-list")
         .find()
@@ -156,8 +160,8 @@ object Database {
             .toList()
     }
 
-    suspend fun tryResolveExisting(stub: Filing): Filing {
-        return filings.findOne(and(Filing::dataUrl eq stub.dataUrl, Filing::dateFiled eq stub.dateFiled)) ?: stub
+    suspend fun tryResolveExisting(source: Filing): Filing {
+        return filings.findOne(and(Filing::dataUrl eq source.dataUrl, Filing::dateFiled eq source.dateFiled)) ?: source
     }
 }
 

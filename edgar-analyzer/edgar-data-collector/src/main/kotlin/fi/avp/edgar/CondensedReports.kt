@@ -11,6 +11,7 @@ import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import org.jsoup.parser.Parser
+import org.litote.kmongo.and
 import org.litote.kmongo.coroutine.CoroutineCollection
 import org.litote.kmongo.eq
 import java.lang.Exception
@@ -72,9 +73,9 @@ val props = setOf(
 fun main() {
     runBlocking {
         runOnComputationThreadPool {
-            parseCashflowStatements()
-            parseBalanceStatements()
-            parseIncomeStatements()
+//            parseCashflowStatements()
+//            parseBalanceStatements()
+            parseOperationsStatements()
         }
     }
 }
@@ -145,12 +146,15 @@ suspend fun parseBalanceSheet(filing: Filing): CondensedReport? {
     return parseCondensedReport(filing, "${filing.dataUrl!!}/${filing.files!!.balance}", filing.files?.balance(filing.dataUrl!!))
 }
 
-suspend fun parseIncomeStatement(filing: Filing): CondensedReport? {
-    return parseCondensedReport(filing, "${filing.dataUrl!!}/${filing.files!!.income}", filing.files?.income(filing.dataUrl!!))
+suspend fun parseOperationsStatement(filing: Filing): CondensedReport? {
+    return parseCondensedReport(filing, "${filing.dataUrl!!}/${filing.files!!.operations}", filing.files?.operations(filing.dataUrl!!))
 }
 
 fun parseCondensedReport(filing: Filing, fileUrl: String, condensedReportContent: String?): CondensedReport? {
     println("${counter.incrementAndGet()} ${filing.companyName} ${filing.dateFiled} ${filing.formType}")
+    if (condensedReportContent == null) {
+        println("content missing for ${fileUrl}")
+    }
     return condensedReportContent?.let { condensedReport ->
         val xml = condensedReport.replace("<link rel=\"StyleSheet\" type=\"text/css\" href=\"report.css\">", "")
                 .replace("'", "")
@@ -336,8 +340,8 @@ class XmlCondensedReport(val document: Document, val filing: Filing, val fileUrl
     }
 }
 
-suspend fun parseIncomeStatements() {
-    parse(Database.income) { parseIncomeStatement(it) }
+suspend fun parseOperationsStatements() {
+    parse(Database.operations) { parseOperationsStatement(it) }
 }
 
 suspend fun parseBalanceStatements() {
@@ -352,21 +356,27 @@ suspend fun parse(collection: CoroutineCollection<CondensedReport>, function: su
     collection.drop()
     collection.ensureIndex("{dataUrl: 1}")
     val counter = AtomicInteger(0)
-    Database.getAllFilings("{formType: '10-K'}").forEachAsync { cursor ->
-        cursor.consumeEach {filing ->
-            coroutineScope {
-                try {
-                    function(filing)?.let {
-                        collection.save(it)
-                    }
-                }  catch (e: Exception) {
-                    println("failed to parse condensed report")
-                    collection.save(CondensedReport(
+    Database.getAllFilings(
+        and(
+            Filing::formType eq "10-K"
+            //, Filing::dateFiled gt LocalDate.now().minusDays(50)
+        ))
+        .forEachAsync { cursor ->
+            cursor.consumeEach {filing ->
+                coroutineScope {
+                    try {
+                        function(filing)?.let {
+                            collection.save(it)
+                            println("saved ${counter.incrementAndGet()}")
+                        }
+                    }  catch (e: Exception) {
+                        println("failed to parse condensed report")
+                        collection.save(CondensedReport(
                             filingId = filing._id!!,
                             dataUrl = "",
                             status = OperationStatus.FAILED))
+                    }
                 }
             }
         }
-    }
 }

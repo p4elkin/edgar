@@ -42,6 +42,41 @@ const Pagination = ({gotoPage, previousPage, nextPage, canPreviousPage, canNextP
     </div>)
 }
 
+export const cellWithTwoValues = (right, left) => {
+    return (<>
+        <span style={{float: "left"}}>{right}</span>
+        <span style={{float: "right"}}>{left}</span>
+    </>)
+}
+
+export const metric = (right, left) => {
+    const color = left > 0 ? "green" : "red"
+    const increaseStr = left > 0 ? `+${left}` : left
+    return (<>
+        <span style={{float: "left"}}>{right}</span>
+        <span style={{float: "right", color: color}}>({increaseStr}%)</span>
+    </>)
+}
+
+export const formatNumber = (num) => {
+    let number = Number.parseFloat(num);
+    if (!Number.isNaN(number)) {
+        return number.toFixed(2)
+    } else {
+        return "-"
+    }
+}
+
+export const formatMetric = (value, yearToYearRatio) => {
+    const numValue = Number.parseFloat(value)
+    if (Number.isNaN(numValue)) {
+        return (<span>-</span>)
+    } else {
+        const yearToYearInPercents = formatNumber((Number.parseFloat(yearToYearRatio) - 1.0) * 100.0)
+        return metric(numValue.toFixed(2), `${yearToYearInPercents}`)
+    }
+}
+
 export const FilingGrid = ({filter, columns, data, fetchData, loading, pageCount: controlledPageCount}) => {
     const {
         getTableProps,

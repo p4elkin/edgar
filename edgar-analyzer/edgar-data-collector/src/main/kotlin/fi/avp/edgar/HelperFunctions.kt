@@ -4,7 +4,6 @@ import com.github.michaelbull.retry.retry
 import com.mongodb.BasicDBObject
 import com.mongodb.client.result.UpdateResult
 import fi.avp.edgar.util.*
-import jdk.nashorn.internal.objects.NativeArray.forEach
 import kotlinx.coroutines.*
 import kotlinx.serialization.Serializable
 import org.bson.Document
@@ -13,13 +12,13 @@ import org.litote.kmongo.*
 import org.litote.kmongo.coroutine.*
 import java.io.BufferedInputStream
 import java.io.FileOutputStream
-import java.lang.Exception
+import java.net.URI
 import java.nio.charset.StandardCharsets
+import java.nio.file.FileSystems
 import java.nio.file.Files
 import java.nio.file.Paths
+import java.nio.file.StandardOpenOption
 import java.time.LocalDate
-import java.time.temporal.ChronoUnit
-import java.time.temporal.Temporal
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.zip.ZipEntry
@@ -135,12 +134,16 @@ suspend fun consolidateCompanyInfo() {
 fun main() {
     runBlocking {
 //        fixDataExtraction()
-        resolveCashIncomeForAnnualFilings()
-        dump10KReportsToCSVRowPerFiling()
+//        resolveCashIncomeForAnnualFilings()
+        downloadOperationsStatements()
+//        dump10KReportsToCSVRowPerFiling()
 //        sniffSplitData()
     }
 }
 
+suspend fun removeLastSixtyDaysOfFilings() {
+    Database.filings.deleteMany(Filing::dateFiled gte LocalDate.now().minusDays(60L))
+}
 
 suspend fun extractMetrics(update: (Filing) -> Filing) {
     val reports = Database.database.getCollection<Filing>("sp500")
@@ -399,6 +402,53 @@ suspend fun fixDataExtraction() {
             .withTicker()
             .withBasicFilingData()
             .withExtractedMetrics())
+    }
+}
+
+suspend fun downloadFilingIndexes() {
+    updateFilingsConcurrently { filing ->
+        filing.files?.operations?.let {
+            appendFileToZip("${filing.dataUrl}/FilingSummary.xml", filing)
+        }
+        UpdateResult.unacknowledged()
+    }
+}
+
+suspend fun downloadOperationsStatements() {
+    updateFilingsConcurrently { filing ->
+        filing.files?.operations?.let {
+            appendFileToZip("${filing.dataUrl}/$it", filing)
+        }
+        UpdateResult.unacknowledged()
+    }
+}
+
+suspend fun appendFileToZip(fileUrl: String, filing: Filing) {
+    filing.files?.let {files ->
+        files.operations?.let {operations ->
+            files.getReportZip(filing.dataUrl!!).let { reportZip ->
+
+                try {
+                    FileSystems.newFileSystem(URI.create("jar:${reportZip.toUri()}"), hashMapOf("create" to "true")).use {
+                        val operationsEntry = it.getPath(operations)
+                        if (!Files.exists(operationsEntry)) {
+                            val fileContent = retry {
+                                asyncGetText(fileUrl)
+                            }
+
+                            Files.newBufferedWriter(operationsEntry, StandardCharsets.UTF_8, StandardOpenOption.CREATE).use {
+                                it.write(fileContent)
+                            }
+                        } else {
+                            println("already exists")
+                        }
+                    }
+                } catch (e: Throwable) {
+                    println("Failed to append file: ${e.message}")
+                    e.printStackTrace()
+                }
+            }
+        }
     }
 }
 

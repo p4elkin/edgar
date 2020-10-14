@@ -52,6 +52,7 @@ export const FilterBar = () => {
             />
             <FormControlLabel
                 value="end"
+                className="checkbox-filter"
                 control={
                     <Checkbox
                         color="primary"
@@ -60,6 +61,24 @@ export const FilterBar = () => {
                 margin="normal"
                 label="10-K only"
                 labelPlacement="end"
+                onChange={(event) => {
+                    dispatch({type:'updateFilter', updatedFilter: {...filter, annualOnly: event.target.checked}})
+                }}
+            />
+            <FormControlLabel
+                value="end"
+                className="checkbox-filter"
+                control={
+                    <Checkbox
+                        color="primary"
+                        margin="normal"
+                    />}
+                margin="normal"
+                label="Missing revenue"
+                labelPlacement="end"
+                onChange={(event) => {
+                    dispatch({type:'updateFilter', updatedFilter: {...filter, withMissingRevenue: event.target.checked}})
+                }}
             />
         </Styles>
     )
@@ -70,6 +89,11 @@ const Styles = styled.div`
     
     .company-filter {
         margin-left: 1em
+    }
+    
+    .checkbox-filter {
+        margin-left: 0.5em;
+        margin-top: 1.5em;
     }
 `;
 

@@ -1,6 +1,5 @@
 package fi.avp.edgar.endpoint
 
-import ch.qos.logback.classic.turbo.DynamicThresholdFilter
 import com.mongodb.BasicDBObject
 import fi.avp.edgar.*
 import fi.avp.edgar.util.asyncGetText
@@ -9,24 +8,20 @@ import fi.avp.edgar.util.mapAsync
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Contextual
 import kotlinx.serialization.Serializable
 import org.bson.conversions.Bson
 import org.litote.kmongo.*
 import org.litote.kmongo.coroutine.replaceOne
-import org.springframework.boot.autoconfigure.EnableAutoConfiguration
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.autoconfigure.mongo.MongoAutoConfiguration
 import org.springframework.boot.autoconfigure.mongo.MongoReactiveAutoConfiguration
-import org.springframework.boot.builder.SpringApplicationBuilder
 import org.springframework.boot.runApplication
 import org.springframework.context.annotation.Bean
 import org.springframework.http.MediaType
 import org.springframework.scheduling.annotation.EnableScheduling
-import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RequestParam
@@ -117,7 +112,7 @@ data class FilingDTO(
 @Component
 class CurrentIndexCrawler {
 
-    @Scheduled(fixedRate = 24 * 60 * 60 * 1000)
+//    @Scheduled(fixedRate = 24 * 60 * 60 * 1000)
     fun crawl() {
         val daysBack: Long = 7
         runBlocking(Executors.newFixedThreadPool(8).asCoroutineDispatcher()) {
@@ -154,11 +149,12 @@ class CurrentIndexCrawler {
     }
 
     data class Filter(
-        val startDate: Long?,
-        val endDate: Long?,
-        val company: String?,
-        val revenueThreshold: Long = 1000_000_000
-    )
+            val annualOnly: Boolean?,
+            val withMissingRevenue: Boolean?,
+            val startDate: Long?,
+            val endDate: Long?,
+            val company: String?,
+            val revenueThreshold: Long = 1000_000_000)
 
     @RestController
     open class Endpoint() {
@@ -177,15 +173,38 @@ class CurrentIndexCrawler {
                 Filing::dateFiled lte (filter.endDate?.let { localDateFromMillis(it)} ?: LocalDate.now()))
 
 
-            return and(
-                Filing::latestRevenue gt filter.revenueThreshold.toDouble(),
-                dateFilter,
-                companyFilter
+            var bsonFilter = and(
+                    Filing::latestRevenue gt filter.revenueThreshold.toDouble(),
+                    dateFilter,
+                    companyFilter
             )
+
+            if (filter.annualOnly == true) {
+               bsonFilter = and(bsonFilter, Filing::formType eq "10-K")
+            }
+
+            if (filter.withMissingRevenue == true) {
+                bsonFilter = and(bsonFilter, Filing::revenue eq null)
+            }
+
+            return bsonFilter
+        }
+
+        @GetMapping(value = ["/withErrors"], produces = [MediaType.APPLICATION_JSON_VALUE])
+        fun withMissingRevenue(@RequestParam limit: Int, @RequestParam offset: Int): Flow<FilingDTO> {
+            return Database.filings.find(and(Filing::revenue eq null, Filing::formType eq "10-K"))
+                    .sort(BasicDBObject("dateFiled", -1))
+                    .skip(offset)
+                    .limit(limit).toFlow().map { it.toDto() }
+//                    .toFlow().flatMapConcat { filing ->
+//                        filing.files?.operations?.let {
+//                            Database.operations.find("{dataUrl: '${filing.dataUrl}/$it'}")
+//                        }?.toFlow() ?: emptyFlow()
+//                    }
         }
 
         @GetMapping(value = ["/latestFilings"], produces = [MediaType.APPLICATION_JSON_VALUE])
-        suspend fun latestFilings(@RequestParam limit: Int, @RequestParam offset: Int, filter: Filter): Flow<FilingDTO> {
+        fun latestFilings(@RequestParam limit: Int, @RequestParam offset: Int, filter: Filter): Flow<FilingDTO> {
             return Database.filings.find(filter(filter))
                 .sort(BasicDBObject("dateFiled", -1))
                 .skip(offset)

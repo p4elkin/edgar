@@ -1,5 +1,5 @@
 import React, {useEffect, useState} from 'react'
-import {FilingGrid} from "./table";
+import {cellWithTwoValues, FilingGrid, formatMetric} from "./table";
 import {useGlobalState} from "../state";
 
 
@@ -18,6 +18,8 @@ export const Filings = () => {
         setLoading(true);
         if (fetchId === fetchIdRef.current) {
             let url = new URL(`http://${window.location.hostname}:8888/latestFilings`), params = {
+                annualOnly: filter.annualOnly,
+                withMissingRevenue: filter.withMissingRevenue,
                 limit: pageSize,
                 offset: pageIndex * pageSize,
                 startDate: filter.startDate,
@@ -49,35 +51,6 @@ const filterNullQueryParams = params => {
 }
 
 
-const cellWithTwoValues = (right, left) => {
-    return (<>
-        <span style={{float: "left"}}>{right}</span>
-        <span style={{float: "right"}}>{left}</span>
-    </>)
-}
-
-const metric = (right, left) => {
-    const color = left > 0 ? "green" : "red"
-    const increaseStr = left > 0 ? `+${left}` : left
-    return (<>
-        <span style={{float: "left"}}>{right}</span>
-        <span style={{float: "right", color: color}}>({increaseStr}%)</span>
-    </>)
-}
-
-const formatNumber = (num) => {
-    return Number.parseFloat(num).toFixed(2)
-}
-
-const formatMetric = (value, yearToYearRatio) => {
-    const numValue = Number.parseFloat(value)
-    if (Number.isNaN(numValue)) {
-        return (<span>-</span>)
-    } else {
-        const yearToYearInPercents = formatNumber((Number.parseFloat(yearToYearRatio) - 1.0) * 100.0)
-        return metric(numValue.toFixed(2), `${yearToYearInPercents}`)
-    }
-}
 
 const configureColumns = () => [
     {

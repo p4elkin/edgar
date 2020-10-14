@@ -1,4 +1,4 @@
-import {FilingGrid} from "./table";
+import {cellWithTwoValues, FilingGrid, formatMetric, formatNumber} from "./table";
 import React, {useState} from "react";
 
 export const MissingRevenueList = () => {
@@ -37,13 +37,26 @@ export const MissingRevenueList = () => {
 
 const configureColumns = () => [
     {
-        Header: 'Filings',
+        Header: 'With no revenue',
         columns: [
             {
-                Header: 'Filing',
-                accessor: 'interactiveData',
-                Cell: ({value}) => <a href={value}>Filing</a>,
+                Header: 'Company',
+                accessor: row => ({name: row.name, ticker: row.ticker}),
+                Cell: ({value}) => cellWithTwoValues(value.name, value.ticker)
+            },
+            {
+                Header: 'Current EPS',
+                accessor: row => formatNumber(row.eps),
+            },
+            {
+                Header: 'Revenue ($ millions)',
+                accessor: row => formatNumber(row.revenue),
+            },
+            {
+                Header: 'Net Income ($ millions)',
+                accessor: row => formatNumber(row.netIncome),
             }
+
         ],
     }
 ];
