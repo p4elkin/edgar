@@ -150,6 +150,10 @@ suspend fun parseOperationsStatement(filing: Filing): CondensedReport? {
     return parseCondensedReport(filing, "${filing.dataUrl!!}/${filing.files!!.operations}", filing.files?.operations(filing.dataUrl!!))
 }
 
+suspend fun parseIncomeStatement(filing: Filing): CondensedReport? {
+    return parseCondensedReport(filing, "${filing.dataUrl!!}/${filing.files!!.income}", filing.files?.income(filing.dataUrl!!))
+}
+
 fun parseCondensedReport(filing: Filing, fileUrl: String, condensedReportContent: String?): CondensedReport? {
     println("${counter.incrementAndGet()} ${filing.companyName} ${filing.dateFiled} ${filing.formType}")
     if (condensedReportContent == null) {
@@ -338,6 +342,10 @@ class XmlCondensedReport(val document: Document, val filing: Filing, val fileUrl
         return row.select("ElementName").text().replace("_", ":") to
                row.select("Label").text()
     }
+}
+
+suspend fun parseIncomeStatements() {
+    parse(Database.income) { parseIncomeStatement(it) }
 }
 
 suspend fun parseOperationsStatements() {

@@ -56,6 +56,7 @@ object Database {
     val cashflow = database.getCollection<CondensedReport>("cashflow")
     val balance = database.getCollection<CondensedReport>("balance")
     val operations = database.getCollection<CondensedReport>("operations")
+    val income = database.getCollection<CondensedReport>("income")
 
     init {
 

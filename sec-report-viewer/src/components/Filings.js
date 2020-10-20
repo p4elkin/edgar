@@ -1,65 +1,37 @@
 import React, {useEffect, useState} from 'react'
-import {cellWithTwoValues, FilingGrid, formatMetric} from "./table";
+import {cellWithTwoValues, PagedGrid, formatMetric} from "./table";
 import {useGlobalState} from "../state";
-
+import {location} from "../commons";
+import {FilingAmendmentPopup} from "./FilingPopup";
+import {Icon} from "@material-ui/core";
+import {Launch} from "@material-ui/icons";
+import Link from "@material-ui/core/Link";
 
 export const Filings = () => {
-    const columns = React.useMemo(configureColumns, []);
-    const [data, setData] = useState([]);
-    const [loading, setLoading] = useState(false);
-    const fetchIdRef = React.useRef(0);
+    const [amendedFiling, setAmendedFiling] = useState(null);
+    const columns = React.useMemo(() => configureColumns(setAmendedFiling), []);
     const [{filter}] = useGlobalState()
 
-    const fetchData = async function({ pageSize, pageIndex }) {
-        // Give this fetch an ID
-        const fetchId = ++fetchIdRef.current
-
-        // Set the loading state
-        setLoading(true);
-        if (fetchId === fetchIdRef.current) {
-            let url = new URL(`http://${window.location.hostname}:8888/latestFilings`), params = {
-                annualOnly: filter.annualOnly,
-                withMissingRevenue: filter.withMissingRevenue,
-                limit: pageSize,
-                offset: pageIndex * pageSize,
-                startDate: filter.startDate,
-                endDate: filter.endDate,
-                company: filter.company,
-                revenueThreshold: 1000000000
-            };
-
-            Object.keys(params).forEach(key => {
-                if ((params[key] && params[key] !== "") || params[key] === 0) url.searchParams.append(key, params[key])
-            })
-
-            let fetchedFilings = await fetch(url);
-
-            setData(await fetchedFilings.json());
-            setLoading(false)
-        }
-    };
-
-    return (<FilingGrid filter={filter} columns={columns} data={data} fetchData={fetchData} loading={loading}/>)
+    const grid = <PagedGrid endPoint={`${location}/latestFilings`} filter={filter} columns={columns}/>
+    if (amendedFiling) {
+        return (<>
+            {grid}
+            <FilingAmendmentPopup id={amendedFiling.id} filing={amendedFiling} onClose={() => setAmendedFiling(null)}/>
+        </>)
+    } else {
+        return (grid)
+    }
 }
 
-const filterNullQueryParams = params => {
-    return Object.keys(params)
-        .filter(param => params[param])
-        .reduce((res, param) => {
-            res[param] = params[param]
-        }, {})
-}
-
-
-
-const configureColumns = () => [
-    {
-        Header: 'Filings',
-        columns: [
+const configureColumns = (setAmendedFiling) => [
             {
                 Header: 'Company',
-                accessor: row => ({name: row.name, ticker: row.ticker}),
-                Cell: ({value}) => cellWithTwoValues(value.name, value.ticker)
+                accessor: row => row,
+                Cell: ({value}) =>
+                    (<>
+                    <Link onClick={() => setAmendedFiling(value)}><Launch/></Link>
+                    {cellWithTwoValues(value.name, value.ticker)}
+                    </>)
             },
             {
                 Header: 'Date',
@@ -75,7 +47,8 @@ const configureColumns = () => [
             },
             {
                 Header: 'Revenue ($ millions)',
-                accessor: row => formatMetric(row.revenue, row.revenueYY),
+                accessor: row => row,
+                Cell: ({value}) => <span>{formatMetric(value.revenue, value.revenueYY)}</span>
             },
             {
                 Header: 'Net Income ($ millions)',
@@ -89,8 +62,6 @@ const configureColumns = () => [
             {
                 Header: 'Filing',
                 accessor: 'interactiveData',
-                Cell: ({value}) => <a href={value}>Filing</a>,
+                Cell: ({value}) => <a href={value}><Launch/></a>,
             }
-        ],
-    }
 ];

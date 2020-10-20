@@ -22,11 +22,6 @@ open class CashflowTest {
     }
 
     @Test
-    fun regex() {
-        removeSpecialCharacters("test")
-    }
-
-    @Test
     fun adskReportTest() {
         runBlocking {
             val url = "{dataUrl: 'https://www.sec.gov/Archives/edgar/data/769397/000076939717000014'}"

@@ -200,7 +200,7 @@ data class Filing(
 
 
     @Serializable
-    class ReportFiles(
+    data class ReportFiles(
         val visualReport: String? = null,
         val xbrlReport: String? = null,
         val cashFlow: String? = null,
@@ -213,7 +213,7 @@ data class Filing(
             return xbrlReport?.let { getFileContents(it, url) }
         }
 
-        private suspend fun getFileContents(name: String, at: String): String? {
+        public suspend fun getFileContents(name: String, at: String): String? {
             return ZipInputStream(getReportZip(at).toFile().inputStream().buffered()).use { zip ->
                 generateSequence { zip.nextEntry }.find { it.name == name }?.let {
                     val sc = Scanner(zip);

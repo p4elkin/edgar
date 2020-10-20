@@ -1,28 +1,53 @@
-import React from "react";
+import React, {useEffect, useState} from "react";
 import "./App.css";
 import {StateProvider} from "./state";
 import {FilterBar} from "./components/filter";
 import {MissingRevenueList} from "./components/Errors";
 import {Filings} from "./components/Filings";
+import {location} from "./commons";
+import {FilingAmendmentPopup} from "./components/FilingPopup";
 
-function App() {
-  return (
-      <>
-        <FilterBar/>
-        <Filings/>
-      </>);
+const App = () => {
+    // const [filing, setFiling] = useState(null)
+    // useEffect(() => {
+    //     async function loadData() {
+    //         let fetchedFilings = await fetch(`${location}/filing?id=5f39ab783db3f9b3cc9aa929`, {
+    //             headers: {
+    //                 'Content-Type': 'application/json'
+    //             }
+    //         });
+    //         if (fetchedFilings.ok) {
+    //             let json = await fetchedFilings.json();
+    //             setFiling(json)
+    //         }
+    //     }
+    //
+    //     return loadData()
+    // }, []);
+    //
+    // if (filing !== null) {
+    //     return (<FilingAmendmentPopup filing={filing}/>)
+    // } else {
+        return (
+            <>
+                <FilterBar/>
+                <Filings/>
+            </>);
+    // }
+
 }
 
 const AppWithStateProvider = () => {
 
     const initState = {
         filter: {
-            annualOnly: false,
-            minRevenue: 1000000000,
-            startDate: new Date().getTime() - 7 * 24 * 60 * 60 * 1000,
-            endDate: new Date().getTime(),
+            annualOnly: true,
+            revenueThreshold: 1000000000,
+            startDate: new Date().getTime() - 720 * 24 * 60 * 60 * 1000,
+            endDate: new Date().getTime() - 260 * 24 * 60 * 60 * 1000,
             company: null,
-            industryCode: null
+            industryCode: null,
+            withMissingRevenue: true
         }
     };
 

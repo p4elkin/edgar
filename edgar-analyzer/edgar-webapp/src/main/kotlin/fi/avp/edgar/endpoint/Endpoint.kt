@@ -22,6 +22,7 @@ import org.springframework.boot.runApplication
 import org.springframework.context.annotation.Bean
 import org.springframework.http.MediaType
 import org.springframework.scheduling.annotation.EnableScheduling
+import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RequestParam
@@ -29,6 +30,8 @@ import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.cors.CorsConfiguration
 import org.springframework.web.cors.reactive.CorsWebFilter
 import org.springframework.web.cors.reactive.UrlBasedCorsConfigurationSource
+import reactor.core.publisher.Mono
+import reactor.core.publisher.Mono.empty
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -68,6 +71,7 @@ fun Filing.toDto(): FilingDTO {
     } ?: ""
 
     return FilingDTO(
+        _id!!.toString(),
         ticker ?: "unknown",
         companyName!!,
         reportLink,
@@ -91,30 +95,31 @@ fun Filing.toDto(): FilingDTO {
 
 @Serializable
 data class FilingDTO(
-    val ticker: String,
-    val name: String,
-    val reportLink: String,
-    val interactiveData: String,
-    @Contextual
-    val date: LocalDate,
-    val type: String,
-    val epsYY: Double,
-    val eps: Double,
-    val revenueYY: Double,
-    val revenue: Double,
-    val netIncomeYY: Double,
-    val netIncome: Double,
-    val liabilitiesYY: Double,
-    val liabilities: Double,
-    val latestAnnualRevenue: Double
+        val id: String,
+        val ticker: String,
+        val name: String,
+        val reportLink: String,
+        val interactiveData: String,
+        @Contextual
+        val date: LocalDate,
+        val type: String,
+        val epsYY: Double,
+        val eps: Double,
+        val revenueYY: Double,
+        val revenue: Double,
+        val netIncomeYY: Double,
+        val netIncome: Double,
+        val liabilitiesYY: Double,
+        val liabilities: Double,
+        val latestAnnualRevenue: Double
 )
 
 @Component
 class CurrentIndexCrawler {
 
-//    @Scheduled(fixedRate = 24 * 60 * 60 * 1000)
+    @Scheduled(fixedRate = 24 * 60 * 60 * 1000)
     fun crawl() {
-        val daysBack: Long = 7
+        val daysBack: Long = 14
         runBlocking(Executors.newFixedThreadPool(8).asCoroutineDispatcher()) {
             val newFilings = getFilingsAfter(LocalDate.now().minusDays(daysBack))
                     .flatMap {
@@ -141,7 +146,13 @@ class CurrentIndexCrawler {
                                     } else {
                                         Database.filings.save(it)
                                     }
+
+                                    parseIncomeStatement(it)?.let { Database.income.save(it) }
+                                    parseOperationsStatement(it)?.let { Database.operations.save(it) }
+                                    parseBalanceSheet(it)?.let { Database.balance.save(it) }
+                                    parseCashFlow(it)?.let { Database.cashflow.save(it) }
                                 }
+
 
                         delay(5000)
                     }
@@ -174,7 +185,6 @@ class CurrentIndexCrawler {
 
 
             var bsonFilter = and(
-                    Filing::latestRevenue gt filter.revenueThreshold.toDouble(),
                     dateFilter,
                     companyFilter
             )
@@ -185,22 +195,34 @@ class CurrentIndexCrawler {
 
             if (filter.withMissingRevenue == true) {
                 bsonFilter = and(bsonFilter, Filing::revenue eq null)
+            } else {
+                bsonFilter = and(bsonFilter, Filing::latestRevenue gt filter.revenueThreshold.toDouble())
             }
 
             return bsonFilter
         }
 
-        @GetMapping(value = ["/withErrors"], produces = [MediaType.APPLICATION_JSON_VALUE])
-        fun withMissingRevenue(@RequestParam limit: Int, @RequestParam offset: Int): Flow<FilingDTO> {
-            return Database.filings.find(and(Filing::revenue eq null, Filing::formType eq "10-K"))
-                    .sort(BasicDBObject("dateFiled", -1))
-                    .skip(offset)
-                    .limit(limit).toFlow().map { it.toDto() }
-//                    .toFlow().flatMapConcat { filing ->
-//                        filing.files?.operations?.let {
-//                            Database.operations.find("{dataUrl: '${filing.dataUrl}/$it'}")
-//                        }?.toFlow() ?: emptyFlow()
-//                    }
+
+        @GetMapping(value = ["/filing"], produces = [MediaType.APPLICATION_JSON_VALUE])
+        suspend fun filingInfoById(@RequestParam id: String): FilingDTO? {
+            return Database.filings
+                    .findOne("{_id: ObjectId('$id')}")?.toDto()
+        }
+
+        @GetMapping(value = ["/condensedReports"], produces = [MediaType.APPLICATION_JSON_VALUE])
+        suspend fun condensedReports(@RequestParam id: String, @RequestParam type: String): CondensedReport? {
+            return Database.filings
+                    .findOne("{_id: ObjectId('$id')}")?.let {filing ->
+                        val (collection, fileName) = when(type) {
+                            "balance" -> Database.balance to filing.files?.balance
+                            "income" -> Database.income to filing.files?.income
+                            "cashflow" -> Database.cashflow to filing.files?.cashFlow
+                            "operations" -> Database.operations to filing.files?.operations
+                            else -> throw RuntimeException("Unknown condensed report statement $type")
+                        }
+
+                        collection.findOne("{dataUrl: '${filing.dataUrl}/$fileName'}")
+                    }
         }
 
         @GetMapping(value = ["/latestFilings"], produces = [MediaType.APPLICATION_JSON_VALUE])

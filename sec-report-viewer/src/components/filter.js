@@ -51,7 +51,7 @@ export const FilterBar = () => {
                 }}
             />
             <FormControlLabel
-                value="end"
+                checked={filter.annualOnly}
                 className="checkbox-filter"
                 control={
                     <Checkbox
@@ -66,7 +66,7 @@ export const FilterBar = () => {
                 }}
             />
             <FormControlLabel
-                value="end"
+                checked={filter.withMissingRevenue}
                 className="checkbox-filter"
                 control={
                     <Checkbox

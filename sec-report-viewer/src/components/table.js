@@ -1,13 +1,16 @@
 // Let's add a fetchData method to our Table component that will be used to fetch
 // new data when pagination state changes
 // We can also add a loading state to let our table know it's loading new data
-import {usePagination, useTable, useGlobalFilter} from "react-table";
-import React, {useEffect} from "react";
-import Table from "@material-ui/core/Table";
+import {usePagination, useTable, useGlobalFilter, Table} from "react-table";
+import React, {useEffect, useState} from "react";
 import TableHead from "@material-ui/core/TableHead";
 import TableRow from "@material-ui/core/TableRow";
 import TableBody from "@material-ui/core/TableBody";
 import styled from "styled-components";
+import TableCell from "@material-ui/core/TableCell";
+import TableContainer from "@material-ui/core/TableContainer";
+import Paper from "@material-ui/core/Paper";
+import {makeStyles} from "@material-ui/core/styles";
 
 const Pagination = ({gotoPage, previousPage, nextPage, canPreviousPage, canNextPage, pageCount, pageIndex, setPageSize, pageSize}) => {
     return (<div className="pagination">
@@ -77,7 +80,121 @@ export const formatMetric = (value, yearToYearRatio) => {
     }
 }
 
-export const FilingGrid = ({filter, columns, data, fetchData, loading, pageCount: controlledPageCount}) => {
+const filterNullQueryParams = params => {
+    return Object.keys(params)
+        .filter(param => params[param])
+        .reduce((res, param) => {
+            res[param] = params[param]
+        }, {})
+}
+
+const getTargetUrl = (endPoint, filter, pageSize, pageIndex) => {
+    let url = new URL(endPoint)
+
+    url.searchParams.append("limit", pageSize)
+    url.searchParams.append("offset", `${pageIndex * pageSize}`)
+
+    Object.keys(filter).forEach(key => {
+        if ((filter[key] && filter[key] !== "") || filter[key] === 0) url.searchParams.append(key, filter[key])
+    })
+
+    return url;
+}
+
+export const HeaderRow = ({ columns }) => {
+    // Use the state and functions returned from useTable to build your UI
+    const {
+        getTableProps,
+        headerGroups,
+    } = useTable({
+        columns,
+        data: [],
+    })
+
+    return (
+            <TableHead>
+                {headerGroups.map(headerGroup => (
+                    <TableRow {...headerGroup.getHeaderGroupProps()}>
+                        {headerGroup.headers.map(column => (
+                            <TableCell {...column.getHeaderProps()}>
+                                {column.render('Header')}
+                                <span>{column.isSorted ? column.isSortedDesc ? ' 🔽' : ' 🔼' : ''}</span>
+                            </TableCell>
+                        ))}
+                    </TableRow>
+                ))}
+            </TableHead>
+    )
+}
+
+export const SimpleGrid = ({ columns, data }) => {
+    // Use the state and functions returned from useTable to build your UI
+    const {
+        getTableProps,
+        getTableBodyProps,
+        headerGroups,
+        rows,
+        prepareRow,
+    } = useTable({
+        columns,
+        data,
+    })
+
+    // Render the UI for your table
+    return (
+        <StyledTable {...getTableProps()}>
+            <HeaderRow columns={columns}/>
+            <TableBody {...getTableBodyProps()}>
+            {rows.map((row, i) => {
+                prepareRow(row)
+                return (
+                    <TableRow {...row.getRowProps()}>
+                        {row.cells.map(cell => {
+                            return <TableCell {...cell.getCellProps(
+                                [
+                                    {
+                                        className: cell.column.className,
+                                        style: cell.column.style,
+                                        size: 'small'
+                                    },
+                                ]
+                            )}>{cell.render('Cell')}</TableCell>
+                        })}
+                    </TableRow>
+                )
+            })}
+            </TableBody>
+        </StyledTable>
+    )
+}
+
+export const PagedGrid = ({endPoint, filter, columns, pageCount: controlledPageCount}) => {
+
+    useEffect(() => {
+        setGlobalFilter(filter)
+    }, [filter])
+
+    const [loading, setLoading] = useState(false);
+    const [data, setData] = useState([]);
+
+    const fetchData = async function({ pageSize, pageIndex }) {
+        // Give this fetch an ID
+        const fetchId = ++fetchIdRef.current
+
+        // Set the loading state
+        setLoading(true);
+        if (fetchId === fetchIdRef.current) {
+            let url = getTargetUrl(endPoint, filter, pageSize, pageIndex);
+
+            let fetchedFilings = await fetch(url);
+
+            setData(await fetchedFilings.json());
+            setLoading(false)
+        }
+    };
+
+    const fetchIdRef = React.useRef(0);
+
     const {
         getTableProps,
         getTableBodyProps,
@@ -115,14 +232,19 @@ export const FilingGrid = ({filter, columns, data, fetchData, loading, pageCount
         usePagination
     );
 
-    useEffect(() => {
-        setGlobalFilter(filter)
-    }, [filter])
+    const useStyles = makeStyles({
+        table: {
+            minWidth: 650,
+            width: "100%",
+        },
+    });
 
     // Listen for changes in pagination and use the state to fetch our new data
     useEffect(() => {
         fetchData({ pageIndex, pageSize })
     }, [pageIndex, pageSize, globalFilter])
+
+    const classes = useStyles();
 
     const paginationProps = {canPreviousPage,
         canNextPage,
@@ -135,79 +257,58 @@ export const FilingGrid = ({filter, columns, data, fetchData, loading, pageCount
         setPageSize}
     // Render the UI for your table
     return (
-        <Styles>
-            <Table {...getTableProps()}>
-                <TableHead>
-                    {headerGroups.map(headerGroup => (
-                        <TableRow {...headerGroup.getHeaderGroupProps()}>
-                            {headerGroup.headers.map(column => (
-                                <th {...column.getHeaderProps()}>
-                                    {column.render('Header')}
-                                    <span>{column.isSorted ? column.isSortedDesc ? ' 🔽' : ' 🔼' : ''}</span>
-                                </th>
-                            ))}
-                        </TableRow>
-                    ))}
-                </TableHead>
-                <TableBody {...getTableBodyProps()}>
-                    {page.map((row, i) => {
-                        prepareRow(row);
-                        return (
-                            <TableRow {...row.getRowProps()}>
-                                {row.cells.map(cell => {
-                                    return <td {...cell.getCellProps()}>{cell.render('Cell')}</td>
-                                })}
+        <>
+            <TableContainer component={Paper}>
+                <StyledTable className={classes.table}{...getTableProps()}>
+                    <TableHead>
+                        {headerGroups.map(headerGroup => (
+                            <TableRow {...headerGroup.getHeaderGroupProps()}>
+                                {headerGroup.headers.map(column => (
+                                    <TableCell {...column.getHeaderProps()}>
+                                        {column.render('Header')}
+                                        <span>{column.isSorted ? column.isSortedDesc ? ' 🔽' : ' 🔼' : ''}</span>
+                                    </TableCell>
+                                ))}
                             </TableRow>
-                        )
-                    })}
-                    <TableRow>
-                        {loading ? (
-                            // Use our custom loading state to show a loading indicator
-                            <td colSpan="10000">Loading...</td>) : (
-                            <td colSpan="10000">
-                                {pageIndex * page.length} to {(pageIndex + 1) * page.length} filings
-                            </td>
-                        )}
-                    </TableRow>
-                </TableBody>
-            </Table>{
-            // Pagination can be built however you'd like. This is just a very basic UI implementation:
-        }
-        <Pagination {...paginationProps}/>
-        </Styles>
+                        ))}
+                    </TableHead>
+                    <TableBody {...getTableBodyProps()}>
+                        {page.map((row, i) => {
+                            prepareRow(row);
+                            return (
+                                <TableRow {...row.getRowProps()}>
+                                    {row.cells.map(cell => {
+                                        return <TableCell{...cell.getCellProps(
+                                            [
+                                                {
+                                                    className: cell.column.className,
+                                                    style: cell.column.style,
+                                                    size: 'small'
+                                                },
+                                            ]
+                                        )}>{cell.render('Cell')}</TableCell>
+                                    })}
+                                </TableRow>
+                            )
+                        })}
+                        <TableRow>
+                            {loading ? (
+                                // Use our custom loading state to show a loading indicator
+                                <TableCell colSpan="10000">Loading...</TableCell>) : (
+                                <TableCell colSpan="10000">
+                                    {pageIndex * page.length} to {(pageIndex + 1) * page.length} filings
+                                </TableCell>
+                            )}
+                        </TableRow>
+                    </TableBody>
+                </StyledTable>{
+                // Pagination can be built however you'd like. This is just a very basic UI implementation:
+            }
+                <Pagination {...paginationProps}/>
+            </TableContainer>
+        </>
     )
 };
 
-const Styles = styled.div`
-  padding: 1rem;
-
-  table {
-    border-spacing: 0;
-    border: 1px solid black;
-    width: 100%;
-
-    tr {
-      :last-child {
-        td {
-          border-bottom: 0;
-        }
-      }
-    }
-
-    th,
-    td {
-      margin: 0;
-      padding: 0.5rem;
-      border-bottom: 1px solid black;
-      border-right: 1px solid black;
-      text-align: center;
-
-      :last-child {
-        border-right: 0;
-      }
-    }
-  }
-  .pagination {
-    padding: 0.5rem;
-  }
+export const StyledTable = styled.table`
 `;

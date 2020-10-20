@@ -135,7 +135,9 @@ fun main() {
     runBlocking {
 //        fixDataExtraction()
 //        resolveCashIncomeForAnnualFilings()
-        downloadOperationsStatements()
+        //updateIncomeStatement()
+        downloadFilingIndexes()
+        //downloadOperationsStatements()
 //        dump10KReportsToCSVRowPerFiling()
 //        sniffSplitData()
     }
@@ -408,7 +410,7 @@ suspend fun fixDataExtraction() {
 suspend fun downloadFilingIndexes() {
     updateFilingsConcurrently { filing ->
         filing.files?.operations?.let {
-            appendFileToZip("${filing.dataUrl}/FilingSummary.xml", filing)
+            appendFileToZip(filing, "FilingSummary.xml")
         }
         UpdateResult.unacknowledged()
     }
@@ -417,26 +419,44 @@ suspend fun downloadFilingIndexes() {
 suspend fun downloadOperationsStatements() {
     updateFilingsConcurrently { filing ->
         filing.files?.operations?.let {
-            appendFileToZip("${filing.dataUrl}/$it", filing)
+            appendFileToZip(filing, it)
         }
         UpdateResult.unacknowledged()
     }
 }
 
-suspend fun appendFileToZip(fileUrl: String, filing: Filing) {
+suspend fun updateIncomeStatement() {
+    updateFilingsConcurrently { filing ->
+        val updatedFiling = filing.files?.let { files ->
+            files.getFileContents("FilingSummary.xml", filing.dataUrl!!)?.let {
+                summaryContent ->
+                    filing.copy(files =
+                    files.copy(income =
+                        FilingSummary(summaryContent.byteInputStream())
+                                .getConsolidatedStatementOfIncome()))
+            }
+        }
+
+        updatedFiling?.let {
+            Database.filings.save(it)
+        } ?: UpdateResult.unacknowledged()
+    }
+
+}
+
+suspend fun appendFileToZip(filing: Filing, fileName: String) {
     filing.files?.let {files ->
-        files.operations?.let {operations ->
             files.getReportZip(filing.dataUrl!!).let { reportZip ->
 
                 try {
                     FileSystems.newFileSystem(URI.create("jar:${reportZip.toUri()}"), hashMapOf("create" to "true")).use {
-                        val operationsEntry = it.getPath(operations)
-                        if (!Files.exists(operationsEntry)) {
+                        val entry = it.getPath(fileName)
+                        if (!Files.exists(entry)) {
                             val fileContent = retry {
-                                asyncGetText(fileUrl)
+                                asyncGetText("${filing.dataUrl}/${fileName}")
                             }
 
-                            Files.newBufferedWriter(operationsEntry, StandardCharsets.UTF_8, StandardOpenOption.CREATE).use {
+                            Files.newBufferedWriter(entry, StandardCharsets.UTF_8, StandardOpenOption.CREATE).use {
                                 it.write(fileContent)
                             }
                         } else {
@@ -448,7 +468,6 @@ suspend fun appendFileToZip(fileUrl: String, filing: Filing) {
                     e.printStackTrace()
                 }
             }
-        }
     }
 }
 
