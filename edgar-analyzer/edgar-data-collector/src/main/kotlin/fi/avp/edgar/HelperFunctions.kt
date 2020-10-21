@@ -12,6 +12,7 @@ import org.litote.kmongo.*
 import org.litote.kmongo.coroutine.*
 import java.io.BufferedInputStream
 import java.io.FileOutputStream
+import java.lang.Exception
 import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.nio.file.FileSystems
@@ -135,7 +136,7 @@ fun main() {
     runBlocking {
 //        fixDataExtraction()
 //        resolveCashIncomeForAnnualFilings()
-        //updateIncomeStatement()
+//        updateIncomeStatement()
         downloadFilingIndexes()
         //downloadOperationsStatements()
 //        dump10KReportsToCSVRowPerFiling()
@@ -408,7 +409,7 @@ suspend fun fixDataExtraction() {
 }
 
 suspend fun downloadFilingIndexes() {
-    updateFilingsConcurrently { filing ->
+    updateFilingsConcurrently("{'files.income': null, dataUrl: 'https://www.sec.gov/Archives/edgar/data/1198415/000168316819000823'}"){ filing ->
         filing.files?.operations?.let {
             appendFileToZip(filing, "FilingSummary.xml")
         }
@@ -426,22 +427,30 @@ suspend fun downloadOperationsStatements() {
 }
 
 suspend fun updateIncomeStatement() {
-    updateFilingsConcurrently { filing ->
-        val updatedFiling = filing.files?.let { files ->
-            files.getFileContents("FilingSummary.xml", filing.dataUrl!!)?.let {
-                summaryContent ->
-                    filing.copy(files =
-                    files.copy(income =
-                        FilingSummary(summaryContent.byteInputStream())
-                                .getConsolidatedStatementOfIncome()))
-            }
-        }
+    updateFilingsConcurrently("{'files.income': null, dataUrl: 'https://www.sec.gov/Archives/edgar/data/1198415/000168316819000823'}") { filing ->
+        filing.files?.let { files ->
+            try {
+                val updatedIncomeFileName = files.getFileContents("FilingSummary.xml", filing.dataUrl!!)?.let {
+                    summaryContent ->
+                    try {
+                        FilingSummary(summaryContent.byteInputStream()).getConsolidatedStatementOfIncome()
+                    } catch (e: Exception) {
+                        println("Failed to parse income statement for ${filing.dataUrl}")
+                        null
+                    }
+                }
 
-        updatedFiling?.let {
-            Database.filings.save(it)
+                if (updatedIncomeFileName != files.income) {
+                    Database.filings.save(filing.copy(files = files.copy(income = updatedIncomeFileName)))
+                } else {
+                    UpdateResult.unacknowledged()
+                }
+            } catch (e: Exception) {
+                println("Failed to resolve filing summary for ${filing.dataUrl}")
+                null
+            }
         } ?: UpdateResult.unacknowledged()
     }
-
 }
 
 suspend fun appendFileToZip(filing: Filing, fileName: String) {

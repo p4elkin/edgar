@@ -75,7 +75,8 @@ fun main() {
         runOnComputationThreadPool {
 //            parseCashflowStatements()
 //            parseBalanceStatements()
-            parseOperationsStatements()
+//            parseOperationsStatements()
+            parseIncomeStatements()
         }
     }
 }
@@ -139,18 +140,22 @@ suspend fun calculateReconciliationValues(filing: Filing): Double {
 }
 
 suspend fun parseCashFlow(filing: Filing): CondensedReport? {
+    if (filing.files == null) return null
     return parseCondensedReport(filing, "${filing.dataUrl!!}/${filing.files!!.cashFlow}", filing.files?.cashFlow(filing.dataUrl!!))
 }
 
 suspend fun parseBalanceSheet(filing: Filing): CondensedReport? {
+    if (filing.files == null) return null
     return parseCondensedReport(filing, "${filing.dataUrl!!}/${filing.files!!.balance}", filing.files?.balance(filing.dataUrl!!))
 }
 
 suspend fun parseOperationsStatement(filing: Filing): CondensedReport? {
+    if (filing.files == null) return null
     return parseCondensedReport(filing, "${filing.dataUrl!!}/${filing.files!!.operations}", filing.files?.operations(filing.dataUrl!!))
 }
 
 suspend fun parseIncomeStatement(filing: Filing): CondensedReport? {
+    if (filing.files == null) return null
     return parseCondensedReport(filing, "${filing.dataUrl!!}/${filing.files!!.income}", filing.files?.income(filing.dataUrl!!))
 }
 
@@ -225,8 +230,12 @@ class HtmlCondensedReport(val document: Document, val filing: Filing, val fileUr
 
     private fun resolveColumns(): List<Column> {
         val headerRowSpan =
-                document.select("tr:eq(0)")
-                        .select("th:eq(0)")?.attr("rowspan")?.toInt() ?: 0
+                try {
+                    document.select("tr:eq(0)")
+                            .select("th:eq(0)")?.attr("rowspan")?.toInt() ?: 0
+                } catch (e: NumberFormatException) {
+                    0
+                }
 
 //        val reportTitleCell = document.select("tr:eq(0) > th:eq(0")
         if (headerRowSpan > 1) {

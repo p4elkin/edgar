@@ -119,7 +119,7 @@ class CurrentIndexCrawler {
 
     @Scheduled(fixedRate = 24 * 60 * 60 * 1000)
     fun crawl() {
-        val daysBack: Long = 14
+        val daysBack: Long = 30
         runBlocking(Executors.newFixedThreadPool(8).asCoroutineDispatcher()) {
             val newFilings = getFilingsAfter(LocalDate.now().minusDays(daysBack))
                     .flatMap {
@@ -136,7 +136,8 @@ class CurrentIndexCrawler {
             newFilings
                     .chunked(5)
                     .forEach {
-                        println("Will now parse $it")
+
+                        println("Will now parse ${it.joinToString(",") { "${it.ticker} ${it.formType}" }}")
                         // resolve everything up to the year to year changes
                         it.mapAsync { scrapeFilingFacts(it) }
                                 .awaitAll()

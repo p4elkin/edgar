@@ -37,7 +37,7 @@ open class FilingSummary(private val summaryStream: InputStream) {
     }
 
     fun getConsolidatedStatementOfIncome(): String? {
-        return findFilingNode("of income")
+        return findFilingNode("of income") ?: findFilingNode("of comprehensive income")
     }
 
     fun getConsolidatedBalanceSheet(): String? {

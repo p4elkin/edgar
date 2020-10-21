@@ -26,14 +26,16 @@ data class ArchiveEntry(
 suspend fun getFilingsAfter(date: LocalDate): List<ArchiveEntry> {
     // TODO - we can crawl across quarters, also need to be able to
     // crawl across years
-    val yearUrl = crawl(DAILY_INDEX).maxBy { it.lastModified }?.url
-    return yearUrl?.let {
-        crawl(it).filter { it.lastModified.isAfter(date.atStartOfDay()) }.map {it.url}.flatMap {
-            crawl(it)
-                .filter { it.name.startsWith("crawler") }
-                .filter { it.lastModified.isAfter(date.atStartOfDay()) }
-        }
-    } ?: emptyList()
+    return crawl(DAILY_INDEX).filter { it.lastModified.year >= date.year }
+            .map { it.url }.flatMap {
+                yearUrl ->
+                    crawl(yearUrl).map {it.url}.flatMap {
+                        crawl(it)
+                                .filter { it.name.startsWith("crawler") }
+                                .filter { it.lastModified.isAfter(date.atStartOfDay()) }
+                    }
+
+            }
 }
 
 suspend fun crawl(url: String): List<ArchiveEntry> {

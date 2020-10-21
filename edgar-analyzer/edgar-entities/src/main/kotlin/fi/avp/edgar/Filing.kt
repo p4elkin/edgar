@@ -198,7 +198,6 @@ data class Filing(
     }
 
 
-
     @Serializable
     data class ReportFiles(
         val visualReport: String? = null,
@@ -215,20 +214,23 @@ data class Filing(
 
         public suspend fun getFileContents(name: String, at: String): String? {
             return ZipInputStream(getReportZip(at).toFile().inputStream().buffered()).use { zip ->
-                generateSequence { zip.nextEntry }.find { it.name == name }?.let {
-                    val sc = Scanner(zip);
-                    val sb = StringBuilder()
-                    while (sc.hasNextLine()) {
-                        sb.appendln(sc.nextLine())
-                    }
-                    sb.toString()
-                }
+                generateSequence { zip.nextEntry }
+                        .takeWhile { zip.available() > 0 }
+                        .find { it.name == name }
+                        ?.let {
+                            val sc = Scanner(zip);
+                            val sb = StringBuilder()
+                            while (sc.hasNextLine()) {
+                                sb.appendln(sc.nextLine())
+                            }
+                            sb.toString()
+                        }
             }
         }
 
         suspend fun getReportZip(url: String): Path {
             suspend fun fetchFiles(): Map<String, String> = retry(limitAttempts(3) + constantDelay(5000)) {
-                listOfNotNull(xbrlReport, income, cashFlow, balance, operations)
+                listOfNotNull("FilingSummary.xml", xbrlReport, income, cashFlow, balance, operations)
                     .mapAsync { it to asyncGetText("$url/$it") }
                     .awaitAll()
                     .toMap()

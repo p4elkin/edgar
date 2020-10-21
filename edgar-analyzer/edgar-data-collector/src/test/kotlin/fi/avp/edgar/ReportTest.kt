@@ -120,18 +120,6 @@ class ReportTest {
     }
 
     @Test
-    fun mapCompanyReportRecordsToData() {
-        val dataStream = getCompanyReports("AAPL")
-        val appleRefs =
-            runBlocking {
-                Database.getFilingsByTicker("AAPL").map {
-                    it to dataStream.get("${it.reference}.xml")
-                }.toMap()
-            }
-        assertTrue { appleRefs.isNotEmpty() }
-    }
-
-    @Test
     fun bxp_20130331_doesNotContainUnnecessaryContexts() {
         val reportDataExtractionResult = reportDataExtractionResult(
             "bxp-20130331.xml", 2013, 3, 31)
@@ -215,12 +203,6 @@ class ReportTest {
 //        println(parseValue("2.47", 2.0 ).toBigDecimal().toPlainString())
 //        println(parseValue("2.47", 0.0 ).toBigDecimal().toPlainString())
 //        println(parseValue("3250000000", -6.0 ).toBigDecimal().toPlainString())
-    }
-
-    @Test
-    fun getReportDataStream() {
-        val dataStream = getCompanyReports("AAPL")
-        assertTrue { dataStream.isNotEmpty() }
     }
 
     @Test
