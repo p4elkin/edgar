@@ -41,13 +41,13 @@ const AppWithStateProvider = () => {
 
     const initState = {
         filter: {
-            annualOnly: true,
             revenueThreshold: 1000000000,
             startDate: new Date().getTime() - 7 * 24 * 60 * 60 * 1000,
             endDate: new Date().getTime(),
             company: null,
             industryCode: null,
-            withMissingRevenue: true
+            withMissingRevenue: false,
+            annualOnly: false,
         }
     };
 

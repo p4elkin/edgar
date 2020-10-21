@@ -70,6 +70,7 @@ suspend fun Filing.withFiles(): Filing {
             try {
                 doResolveFiles();
             } catch (e: java.lang.Exception) {
+                e.printStackTrace()
                 copy(fileResolutionStatus = OperationStatus.FAILED)
             }
         } else -> this
