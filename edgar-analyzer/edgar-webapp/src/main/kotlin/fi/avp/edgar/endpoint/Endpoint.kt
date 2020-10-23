@@ -119,7 +119,7 @@ class CurrentIndexCrawler {
 
     @Scheduled(fixedRate = 24 * 60 * 60 * 1000)
     fun crawl() {
-        val daysBack: Long = 30
+        val daysBack: Long = 3
         runBlocking(Executors.newFixedThreadPool(8).asCoroutineDispatcher()) {
             val newFilings = getFilingsAfter(LocalDate.now().minusDays(daysBack))
                     .flatMap {
