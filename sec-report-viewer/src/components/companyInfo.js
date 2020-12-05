@@ -99,7 +99,7 @@ const QuoteChart = ({ticker}) => {
 const getSeries = (data, metrics, active) => {
     return data.filter(filing => filing.fiscalYear).map(filing => {
         const result = {
-            year: filing["fiscalYear"],
+            fiscalYear: filing["fiscalYear"],
         };
         metrics.forEach(metric => {
             if (active[metric]) {
