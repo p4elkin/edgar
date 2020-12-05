@@ -18,9 +18,11 @@ object Locations {
 
  val reports: Path = parentDir.resolve("data/reports")
 
+ val quotes: Path = parentDir.resolve("data/quotes")
+
  val reportsExtracted: Path = parentDir.resolve("data/reports/extracted")
 
- val splitData = parentDir.resolve("data/split")
+ val splitData = parentDir.resolve("data/split_yfinance")
 }
 
 fun getReportData(ticker: String): Map<String, InputStream>? {

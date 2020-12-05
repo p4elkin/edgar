@@ -15,11 +15,10 @@ import java.io.FileOutputStream
 import java.lang.Exception
 import java.net.URI
 import java.nio.charset.StandardCharsets
-import java.nio.file.FileSystems
-import java.nio.file.Files
-import java.nio.file.Paths
-import java.nio.file.StandardOpenOption
+import java.nio.file.*
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.zip.ZipEntry
@@ -137,10 +136,42 @@ fun main() {
 //        fixDataExtraction()
 //        resolveCashIncomeForAnnualFilings()
 //        updateIncomeStatement()
-        downloadFilingIndexes()
+//        downloadFilingIndexes()
+//        assignIndustryCode()
+        getAllQuotes()
         //downloadOperationsStatements()
 //        dump10KReportsToCSVRowPerFiling()
 //        sniffSplitData()
+    }
+}
+
+suspend fun assignIndustryCode() {
+    val companyList = Database.getCompanyList()
+
+    updateFilingsConcurrently("{}") {filing ->
+        val sicCode = companyList.find { it.cik.contains(filing.cik!!.toInt()) }?.sic ?: -1
+
+        Database.filings.updateOne(filing.copy(sic = setOf(sicCode, (sicCode / 10))))
+    }
+}
+
+suspend fun removeAllFailedFilingReports() {
+    Database.filings.find("{dataExtractionStatus: 'FAILED'}").consumeEach { filing ->
+        filing.files?.xbrlReport?.let {
+            val toDelete = Locations.reports.resolve("$it.zip")
+            if (Files.exists(toDelete)) {
+                Files.delete(toDelete)
+                println("Deleted $toDelete")
+            }
+        }
+    }
+}
+
+suspend fun updateMetrics() {
+    updateFilingsConcurrently("{dataUrl: 'http://www.sec.gov/Archives/edgar/data/27904/000002790420000013'}") {
+        it.copy(dataExtractionStatus = OperationStatus.PENDING).withBasicFilingData()
+        it.withExtractedMetrics()
+        UpdateResult.unacknowledged()
     }
 }
 
@@ -175,6 +206,36 @@ suspend fun getClosestAnnualReportId(filing: Filing): ObjectId? {
         .sort(sortCriteria)
         .first()
         ?._id
+}
+
+suspend fun getAllQuotes() {
+    val now = Instant.now().toEpochMilli()
+    val since = LocalDate.of(2010, 1, 1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+    Database.getSP500Companies().forEach {
+        it.tickers.forEach { ticker ->
+            retry {
+                val splitRequest = asyncGet("https://query1.finance.yahoo.com/v8/finance/chart/$ticker?period1=1262347248&period2=$now&includePrePost=false&events=div,splits&interval=1d")
+                if (splitRequest.code != 200) {
+                    println("failed to get split data for $ticker")
+                } else {
+                    println("got split data for $ticker")
+                    splitRequest.body?.let { body ->
+                        if (Files.exists(Locations.splitData.resolve("$ticker.json"))) {
+                            Files.delete(Locations.splitData.resolve("$ticker.json"))
+                        }
+                        val json = Files.createFile(Locations.splitData.resolve("$ticker.json"))
+                        FileOutputStream(json.toFile()).buffered(1024 * 8).use { out ->
+                            BufferedInputStream(body.byteStream()).use { origin ->
+                                origin.copyTo(out, 8 * 1024)
+                            }
+                        }
+                    }
+                    delay(3000)
+                }
+            }
+
+        }
+    }
 }
 
 fun resolveAnnualReportReferencesSince() {
@@ -363,8 +424,8 @@ suspend fun fixDataExtractionStatus() {
     }
 }
 
-suspend fun updateFilingsConcurrently(filter: String = "{formType: '10-K'}}", transform: suspend (Filing) -> UpdateResult) = coroutineScope {
-    val allFilings = Database.getAllFilings(filter)
+suspend fun updateFilingsConcurrently(filter: String = "{formType: '10-K'}", transform: suspend (Filing) -> UpdateResult) = coroutineScope {
+    val allFilings = Database.getAllFilings(filter, "{dateFiled: 1}")
     counter.set(0)
     runOnComputationThreadPool {
         allFilings.forEachAsync {
@@ -408,12 +469,18 @@ suspend fun fixDataExtraction() {
     }
 }
 
+
+suspend fun verifyParalllelFilingFetchIntegrity() {
+    val size = Database.getAllFilings("{}").map { it.toList() }.flatten().size
+}
+
 suspend fun downloadFilingIndexes() {
-    updateFilingsConcurrently("{'files.income': null, dataUrl: 'https://www.sec.gov/Archives/edgar/data/1198415/000168316819000823'}"){ filing ->
-        filing.files?.operations?.let {
-            appendFileToZip(filing, "FilingSummary.xml")
+    Database.getAllFilings("{}").forEachAsync {
+        it.toList().chunked(50).forEach {
+            it.mapAsync {
+                appendFileToZip(it, "FilingSummary.xml")
+            }.awaitAll()
         }
-        UpdateResult.unacknowledged()
     }
 }
 
@@ -458,7 +525,17 @@ suspend fun appendFileToZip(filing: Filing, fileName: String) {
             files.getReportZip(filing.dataUrl!!).let { reportZip ->
 
                 try {
-                    FileSystems.newFileSystem(URI.create("jar:${reportZip.toUri()}"), hashMapOf("create" to "true")).use {
+                    val uri = URI.create("jar:${reportZip.toUri()}")
+                    val params = hashMapOf("create" to "true")
+
+                    println("opening $uri")
+                    val fs = try {
+                        FileSystems.getFileSystem(uri)
+                    } catch (e: FileSystemNotFoundException) {
+                        FileSystems.newFileSystem(uri, params)
+                    }
+
+                    fs.use {
                         val entry = it.getPath(fileName)
                         if (!Files.exists(entry)) {
                             val fileContent = retry {

@@ -207,7 +207,7 @@ suspend fun Filing.doResolveFiles() = retry(limitAttempts(5)) {
     }
 }
 
-private val taskDispatcher: CoroutineDispatcher = Executors.newFixedThreadPool(16).asCoroutineDispatcher()
+private val taskDispatcher: CoroutineDispatcher = Executors.newFixedThreadPool(8).asCoroutineDispatcher()
 suspend fun Filing.doParseXBRLProperties(): Filing = coroutineScope {
     when (fileResolutionStatus) {
         OperationStatus.MISSING -> {

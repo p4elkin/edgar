@@ -197,6 +197,14 @@ class ReportTest {
 
 
     @Test
+    fun detectsAndParseFilingSuccessfully() {
+        runBlocking {
+            // [Fatal Error] :8:3: The element type "P" must be terminated by the matching end-tag "</P>".
+            Database.filings.findOne("{dataUrl: 'http://www.sec.gov/Archives/edgar/data/1639234/000147793220006002'}")?.withBasicFilingData()
+        }
+    }
+
+    @Test
     fun parseValue() {
 //        println(parseValue("101.2", -8.0 ).toBigDecimal().toPlainString())
 //        println(parseValue("4,674,071", -3.0 ).toBigDecimal().toPlainString())

@@ -7,6 +7,7 @@ COPY edgar-commons/pom.xml edgar-commons/pom.xml
 COPY edgar-entities/pom.xml edgar-entities/pom.xml
 COPY edgar-webapp/pom.xml edgar-webapp/pom.xml
 COPY edgar-data-collector/pom.xml edgar-data-collector/pom.xml
+COPY edgar-rss-crawler/pom.xml edgar-rss-crawler/pom.xml
 COPY pom.xml pom.xml
 
 RUN mvn -B -e -C org.apache.maven.plugins:maven-dependency-plugin:3.1.2:go-offline
@@ -21,12 +22,13 @@ COPY edgar-commons/src edgar-commons/src
 COPY edgar-entities/src edgar-entities/src
 COPY edgar-webapp/src edgar-webapp/src
 COPY edgar-data-collector/src edgar-data-collector/src
+COPY edgar-rss-crawler/src edgar-rss-crawler/src
 
 RUN mvn -B -e clean install -DskipTests=true
 
 FROM openjdk:14-jdk-alpine
 RUN apk add --no-cache bash
-COPY --from=build /opt/app/edgar-webapp/target/edgar-webapp-1.0-SNAPSHOT.jar ./workdir/app/app.jar
+COPY --from=build /opt/app/edgar-webapp/target/edgar-webapp-1.0-SNAPSHOT.jar ./workdir/app/webapp.jar
+COPY --from=build /opt/app/edgar-rss-crawler/target/edgar-rss-crawler-1.0-SNAPSHOT.jar ./workdir/app/crawler.jar
 ENV address mongodb://mongo
 WORKDIR /workdir/app/
-ENTRYPOINT ["/bin/bash", "-c", "java -jar app.jar -Ddb.address=$address -Dspring.profiles.active=production"]

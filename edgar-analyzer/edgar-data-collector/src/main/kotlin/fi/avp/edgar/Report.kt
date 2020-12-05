@@ -1,8 +1,6 @@
 package fi.avp.edgar
 
-import fi.avp.edgar.util.attr
-import fi.avp.edgar.util.find
-import fi.avp.edgar.util.list
+import fi.avp.edgar.util.*
 import org.w3c.dom.Document
 import org.w3c.dom.Node
 import org.w3c.dom.NodeList
@@ -17,6 +15,7 @@ import javax.xml.xpath.XPathConstants
 import javax.xml.xpath.XPathExpression
 import javax.xml.xpath.XPathFactory
 import kotlin.math.abs
+import kotlin.text.find
 
 data class ReportDataExtractionResult(
     val data: List<PropertyData>,
@@ -138,7 +137,7 @@ open class Report(val content: InputStream, private val reportType: String, priv
                 value = it.textContent,
                 decimals = it.attr("decimals") ?: "",
                 scale = it.attr("scale") ?: "",
-                isNegative = it.attr("sign")?.equals("minus") ?: false,
+                isNegative = it.attr("sign")?.equals("-") ?: false,
                 context = contextId,
                 unit = it.attr("unitRef")
             )
@@ -176,20 +175,20 @@ open class Report(val content: InputStream, private val reportType: String, priv
         }
 
         if (ctx == null) {
-            throw RuntimeException()
+            println("Failed to resolve context for ${node.nodeName}, attrs are: ${node.attrList().map { it }.joinToString()}")
         }
 
         return ExtractedValue(
             propertyId, node.textContent,
-            context = ctx.id,
+            context = ctx?.id ?: "",
             unit = unit?.id,
             scale = node.attr("scale") ?: "",
-            isNegative = node.attr("sign")?.equals("minus") ?: false,
+            isNegative = node.attr("sign")?.equals("-") ?: false,
             decimals = node.attr("decimals") ?: ""
         )
     }
 
-    val compiledXPathCache: MutableMap<String, XPathExpression> = hashMapOf()
+    private val compiledXPathCache: MutableMap<String, XPathExpression> = hashMapOf()
 
     private fun xpathExpression(selector: String): XPathExpression {
         return compiledXPathCache.computeIfAbsent(selector) { xpath.compile(it) }
@@ -212,21 +211,22 @@ open class Report(val content: InputStream, private val reportType: String, priv
 
     private fun unitById(id: String): ValueUnit? {
         return unitCache.computeIfAbsent(id) {
-            singleNode("//*[local-name()='unit' and @id='$id']")?.let {
-                ValueUnit(
-                    id,
-                    it.find("measure")?.textContent,
-                    it.find("divide")?.let {
-                        it.find("unitNumerator")?.find("measure")?.textContent!! to
-                                it.find("unitDenominator")?.find("measure")?.textContent!!
-                    })
-            }
+            xpathExpression("//*[local-name()='unit' and @id='$id']")
+                .singleNode(reportDoc)?.let {
+                    ValueUnit(
+                        id,
+                        it.find("measure")?.textContent,
+                        it.find("divide")?.let {
+                            it.find("unitNumerator")?.find("measure")?.textContent!! to
+                                    it.find("unitDenominator")?.find("measure")?.textContent!!
+                        })
+                }
         }
     }
 
     private fun contextById(id: String): Context? {
         return contextCache.computeIfAbsent(id) {
-            singleNode("//*[local-name()='context' and @id='$id']")?.let {
+            xpathExpression("//*[local-name()='context' and @id='$id']").singleNode(reportDoc)?.let {
                 val periodNode = it.find("period")
                 val segment = it.find("entity")?.find("segment")?.textContent
 
@@ -251,14 +251,6 @@ open class Report(val content: InputStream, private val reportType: String, priv
         }
     }
 
-    private fun nodeSet(selector: String): NodeList {
-        return xpathExpression(selector).evaluate(reportDoc, XPathConstants.NODESET) as NodeList
-    }
-
-
-    private fun singleNode(selector: String): Node? {
-        return xpathExpression(selector).evaluate(reportDoc, XPathConstants.NODE) as Node?
-    }
 
     private fun disambiguateProperties(nonAmbiguousContexts: Set<String>, allContexts: Set<Context>, data: List<PropertyData>): List<PropertyData> {
         return data.map {

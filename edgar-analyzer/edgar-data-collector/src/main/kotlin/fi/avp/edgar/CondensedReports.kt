@@ -86,7 +86,7 @@ val cashIncomePattern = Regex("adjustment.*reconcile", RegexOption.IGNORE_CASE)
 val cashIncomePatternAlt = Regex("reconciliation.*income", RegexOption.IGNORE_CASE)
 val cashIncomePatternAlt2 = Regex("adjustments.*continuing", RegexOption.IGNORE_CASE)
 
-suspend fun calculateReconciliationValues(filing: Filing): Double {
+suspend fun calculateReconciliationValues(filing: Filing): Double? {
     Database.cashflow.ensureIndex(CondensedReport::filingId)
     return Database.cashflow.findOne(CondensedReport::filingId eq filing._id)?.let { condensedCashflowStatement ->
         val section = condensedCashflowStatement.sections.find {
@@ -101,7 +101,7 @@ suspend fun calculateReconciliationValues(filing: Filing): Double {
         if (section != null) {
             filing.extractedData?.let { extractedData ->
                 val relatedPropertyList = section.rows
-                    .mapNotNull {row ->
+                    .map {row ->
                         row.values.find { it.columnId == firstColumnId }?.let { valueFromCashflowStatement ->
                             if (valueFromCashflowStatement.value != "0" && !valueFromCashflowStatement.value.isBlank()) {
                                 val value = extractedData.find {it.propertyId == row.propertyId.removePrefix("us-gaap:") }
@@ -118,17 +118,17 @@ suspend fun calculateReconciliationValues(filing: Filing): Double {
                                 }
                             } else null
                         }
-
                     }
 
                 if (relatedPropertyList.contains(null)) {
                     null
                 } else {
-                    if (relatedPropertyList.sum().isNaN()) {
+                    val summedResult = relatedPropertyList.mapNotNull { it }.sum()
+                    if (summedResult.isNaN()) {
                         println("Result is not a number")
                     }
 
-                    relatedPropertyList.sum()
+                    summedResult
                 }
             }
         } else {

@@ -6,35 +6,32 @@ import {MissingRevenueList} from "./components/Errors";
 import {Filings} from "./components/Filings";
 import {location} from "./commons";
 import {FilingAmendmentPopup} from "./components/FilingPopup";
+import {CompanyInfo} from "./components/companyInfo";
+import {
+    BrowserRouter as Router,
+    Switch,
+    Route,
+    Link
+} from "react-router-dom";
+import {Companies} from "./components/Companies";
 
 const App = () => {
-    // const [filing, setFiling] = useState(null)
-    // useEffect(() => {
-    //     async function loadData() {
-    //         let fetchedFilings = await fetch(`${location}/filing?id=5f39ab783db3f9b3cc9aa929`, {
-    //             headers: {
-    //                 'Content-Type': 'application/json'
-    //             }
-    //         });
-    //         if (fetchedFilings.ok) {
-    //             let json = await fetchedFilings.json();
-    //             setFiling(json)
-    //         }
-    //     }
-    //
-    //     return loadData()
-    // }, []);
-    //
-    // if (filing !== null) {
-    //     return (<FilingAmendmentPopup filing={filing}/>)
-    // } else {
-        return (
-            <>
-                <FilterBar/>
-                <Filings/>
-            </>);
-    // }
-
+    return (
+        <>
+            <Router>
+                <div>
+                    <Switch>
+                        <Route path="/companies">
+                            <Companies/>
+                        </Route>
+                        <Route path="/">
+                            <FilterBar/>
+                            <Filings/>
+                        </Route>
+                    </Switch>
+                </div>
+            </Router>
+        </>);
 }
 
 const AppWithStateProvider = () => {

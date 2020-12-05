@@ -6,7 +6,7 @@ export const FilingCard = () => {
 
     useEffect(() => {
         async function loadFilings() {
-            let fetchedFilings = await fetch("http://localhost:8888/latestFilings");
+            let fetchedFilings = await fetch("http://localhost:8889/latestFilings");
             let filingsData = await fetchedFilings.json();
             setFilings(filingsData)
         }

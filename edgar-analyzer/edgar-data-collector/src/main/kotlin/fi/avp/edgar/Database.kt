@@ -1,6 +1,8 @@
 package fi.avp.edgar
 
 import com.mongodb.BasicDBObject
+import com.mongodb.DBObject
+import com.mongodb.client.model.IndexOptions
 import fi.avp.edgar.util.mapAsync
 import fi.avp.edgar.util.runOnComputationThreadPool
 import kotlinx.coroutines.GlobalScope
@@ -14,6 +16,7 @@ import org.litote.kmongo.reactivestreams.KMongo
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import me.moallemi.tools.daterange.localdate.rangeTo
+import okhttp3.internal.wait
 import org.bson.conversions.Bson
 import org.litote.kmongo.*
 import org.litote.kmongo.coroutine.CoroutineFindPublisher
@@ -45,7 +48,7 @@ object Database {
             value..range[index + 1]
         }
 
-        override fun iterator(): Iterator<LocalDateRange> = mapped.iterator()
+        override fun iterator(): Iterator<LocalDateRange> = mapped.reversed().iterator()
     }
 
     private val connectionString = System.getenv("address") ?: "mongodb://localhost"
@@ -59,7 +62,18 @@ object Database {
     val income = database.getCollection<CondensedReport>("income")
 
     init {
+        GlobalScope.async {
+            filings.ensureIndex("sic")
+        }
+    }
 
+    val industryCodes = GlobalScope.async {  database.getCollection<DBObject>("sic")
+        .find()
+        .batchSize(2000)
+        .toList()
+        .map {
+            it.get("code").toString().toInt() to it.get("description").toString()
+        }.toMap()
     }
 
     private val companyList = GlobalScope.async {  database.getCollection<CompanyInfo>("company-list")
@@ -72,24 +86,28 @@ object Database {
         return getAllFilings(bsonFilter = null)
     }
 
-    suspend fun getAllFilings(bsonFilter: Bson? = null): List<CoroutineFindPublisher<Filing>>  {
-        return DateRange()
+    suspend fun getAllFilings(bsonFilter: Bson? = null, sortCriteria: Bson? = null): List<CoroutineFindPublisher<Filing>>  {
+        val dataRanges = DateRange()
             .reversed()
             .chunked(4)
-            .mapAsync {
+        return dataRanges
+            .map { ranges ->
                 runOnComputationThreadPool {
-                    it.map {
-                        val result =
-                            filings.find(
-                                and(
-                                    Filing::dateFiled gt it.start,
-                                    Filing::dateFiled lte it.endInclusive,
-                                    bsonFilter))
+                    val result = ranges.mapAsync { dateRange ->
+                        filings.find(
+                            and(
+                                Filing::dateFiled gt dateRange.start,
+                                Filing::dateFiled lte dateRange.endInclusive,
+                                bsonFilter)).sort(sortCriteria ?: BasicDBObject())
+                            .noCursorTimeout(true)
 //                                .projection(fields(exclude(Filing::extractedData)))
-                        result
-                    }
+
+                    }.awaitAll()
+
+//                    val rangeStr = ranges.map { "[${it.start} - ${it.endInclusive}]" }.joinToString()
+                    result
                 }
-            }.awaitAll()
+            }
             .flatten()
     }
 
@@ -125,8 +143,8 @@ object Database {
         return filings.distinct<String>("ticker", "{formType: '10-K', fiscalYear: 2019}").toList()
     }
 
-    suspend fun getAllFilings(filter: String? = null): List<CoroutineFindPublisher<Filing>>  {
-        return getAllFilings(filter?.let {KMongoUtil.toBson(it)})
+    suspend fun getAllFilings(filter: String? = null, sortCriteria: String? = null): List<CoroutineFindPublisher<Filing>>  {
+        return getAllFilings(filter?.let {KMongoUtil.toBson(it)}, sortCriteria?.let {KMongoUtil.toBson(it)})
     }
 
     suspend fun getCompanyList(): List<CompanyInfo> {
@@ -163,28 +181,6 @@ object Database {
 
     suspend fun tryResolveExisting(source: Filing): Filing {
         return filings.findOne(and(Filing::dataUrl eq source.dataUrl, Filing::dateFiled eq source.dateFiled)) ?: source
-    }
-}
-
-val filingReferencePattern = Regex("^(.*?)\\s+(10-k|10-Q)\\s+(\\d+)\\s+(\\d+)\\s+(.+.htm)")
-suspend fun resolveFilingInfoFromIndexRecord(indexRecord: String): Filing? {
-    return filingReferencePattern.find(indexRecord)?.let {
-        val groups = it.groups
-        val dataUrl = groups[5]?.value?.replace("-", "")?.replace("index.htm", "")
-        Filing(
-            ticker = Database.getCompanyList().find { it.cik.contains(groups[3]!!.value.toInt()) }?.primaryTicker ?: "",
-            companyName = groups[1]!!.value,
-            formType = groups[2]!!.value,
-            fileName = groups[5]!!.value,
-            dataUrl = dataUrl,
-            cik = groups[3]?.value?.toLong(),
-            dateFiled = groups[4]?.value?.let {
-                LocalDate.parse(
-                    it,
-                    DateTimeFormatter.ofPattern("yyyyMMdd")
-                )
-            }
-        )
     }
 }
 

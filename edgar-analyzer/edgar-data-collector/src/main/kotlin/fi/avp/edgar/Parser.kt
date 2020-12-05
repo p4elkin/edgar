@@ -1,17 +1,13 @@
 package fi.avp.edgar
 
 import com.mongodb.BasicDBObject
+import fi.avp.edgar.util.forEachAsync
 import fi.avp.edgar.util.mapAsync
 import kotlinx.coroutines.*
 import org.litote.kmongo.coroutine.replaceOne
 
 suspend fun scrapeFilingFacts(filing: Filing): Filing = coroutineScope {
     try {
-        if (filing.dataExtractionStatus == OperationStatus.FAILED) {
-            println("Skipping previously failed to be parsed filing ${filing.dataUrl}")
-            return@coroutineScope filing
-        }
-
         val filingWithResolvedFiles = filing.withFiles()
 
         val actualFiling = async { filingWithResolvedFiles.withBasicFilingData().withExtractedMetrics() }
@@ -27,15 +23,28 @@ suspend fun scrapeFilingFacts(filing: Filing): Filing = coroutineScope {
 }
 
 fun main(args: Array<String>) = runBlocking {
-    Database.filings.find(
-        "{formType: '10-Q', fileResolutionStatus: 'DONE', dataExtractionStatus: {\$ne: 'DONE'}}")
-        .sort(BasicDBObject("dateFiled", -1)).toList()
-        .chunked(20)
-        .forEach {
-            it.mapAsync { it.withBasicFilingData() }.awaitAll().forEach {
-                Database.filings.replaceOne(it)
+    updateFilingsConcurrently("{formType: '10-K'}") {
+        coroutineScope {
+            try {
+                parseIncomeStatement(it)?.let { Database.income.save(it) }
+                parseOperationsStatement(it)?.let { Database.operations.save(it) }
+                parseBalanceSheet(it)?.let { Database.balance.save(it) }
+                parseCashFlow(it)?.let { Database.cashflow.save(it) }
+            } catch (e: Exception) {
+                println("failed to parse statements for ${it.dataUrl}")
+                e.printStackTrace()
             }
+
+            println("Scraping for ${it.formType} of ${it.companyName} on ${it.dateFiled}")
+            val withAllFacts = scrapeFilingFacts(
+                // make sure to re-fetch all the metrics
+                it.copy(dataExtractionStatus = OperationStatus.PENDING)
+            )
+
+
+            Database.filings.replaceOne(withAllFacts)
         }
+    }
 }
 
 

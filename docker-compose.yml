@@ -19,6 +19,18 @@ services:
             - 8888:8888
         volumes:
             - ./data:/workdir/data
+        entrypoint: ["/bin/bash", "-c", "java -jar webapp.jar -Ddb.address=$address -Dspring.profiles.active=production"]
+    crawler:
+        depends_on:
+            - database
+        image: edgar
+        environment:
+            - address=mongodb://mongo
+        build:
+            context: edgar-analyzer
+        volumes:
+            - ./data:/workdir/data
+        entrypoint: ["/bin/bash", "-c", "java -jar crawler.jar -Ddb.address=$address -Dspring.profiles.active=production"]
     app:
         depends_on:
             - endpoint

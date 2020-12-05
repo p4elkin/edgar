@@ -21,6 +21,7 @@ import java.lang.Exception
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardOpenOption
 import java.time.LocalDate
 import java.time.Duration
 import java.time.format.DateTimeFormatter
@@ -176,7 +177,8 @@ data class Filing(
 
     val fileResolutionStatus: OperationStatus = OperationStatus.PENDING,
     val dataExtractionStatus: OperationStatus? = OperationStatus.PENDING,
-    val yearToYearUpdate: OperationStatus? = OperationStatus.PENDING) {
+    val yearToYearUpdate: OperationStatus? = OperationStatus.PENDING,
+    val sic: Set<Int>? = emptySet()) {
 
     init {
         fileName?.let {
@@ -229,6 +231,7 @@ data class Filing(
         }
 
         suspend fun getReportZip(url: String): Path {
+
             suspend fun fetchFiles(): Map<String, String> = retry(limitAttempts(3) + constantDelay(5000)) {
                 listOfNotNull("FilingSummary.xml", xbrlReport, income, cashFlow, balance, operations)
                     .mapAsync { it to asyncGetText("$url/$it") }
@@ -249,15 +252,21 @@ data class Filing(
             val path = Locations.reports.resolve("$xbrlReport.zip")
             if (!Files.exists(path)) {
                 println("$path missing, creating")
-                val fileData = fetchFiles()
-                // if file still doesn't exist
-                if (!Files.exists(path)) {
+                try {
                     val newZipFile = Files.createFile(path).toFile()
+                    // if file still doesn't exist
+                    val options = setOf(StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+                    Files.newByteChannel(path, options).close();
+
+                    val fileData = fetchFiles()
+
                     ZipOutputStream(newZipFile.outputStream().buffered()).use { out ->
                         fileData.forEach { (name, data) ->
                             createZipEntry(name, data, out)
                         }
                     }
+                } catch (ignore: java.nio.file.FileAlreadyExistsException) {
+                    println("$path already exists, skipping")
                 }
             }
 

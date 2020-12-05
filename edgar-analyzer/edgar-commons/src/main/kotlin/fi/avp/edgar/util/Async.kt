@@ -19,7 +19,7 @@ suspend inline fun <T> Iterable<T>.forEachAsync(crossinline transform: suspend C
     }
 }
 
-private val taskDispatcher: CoroutineDispatcher = Executors.newFixedThreadPool(16).asCoroutineDispatcher()
+private val taskDispatcher: CoroutineDispatcher = Executors.newFixedThreadPool(4).asCoroutineDispatcher()
 
 suspend fun <T> runOnComputationThreadPool(block: suspend CoroutineScope.() -> T) = withContext(taskDispatcher, block)
 
