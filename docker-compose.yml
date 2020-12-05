@@ -16,7 +16,7 @@ services:
         build:
             context: edgar-analyzer
         ports:
-            - 8888:8888
+            - 8889:8889
         volumes:
             - ./data:/workdir/data
         entrypoint: ["/bin/bash", "-c", "java -jar webapp.jar -Ddb.address=$address -Dspring.profiles.active=production"]
