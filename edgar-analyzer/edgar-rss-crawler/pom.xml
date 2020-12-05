@@ -15,7 +15,7 @@
     <name>edgar-rss-crawler</name>
 
     <properties>
-        <start-class>fi.avp.edgar.RssCrawlerApplication</start-class>
+        <start-class>fi.avp.edgar.EdgarRssFeedCrawlerKt</start-class>
     </properties>
 
     <dependencyManagement>
