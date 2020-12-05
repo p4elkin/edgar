@@ -32,7 +32,7 @@ open class RssCrawlerApplication {
 
         @Scheduled(fixedRate = 24 * 60 * 60 * 1000)
         fun crawl() {
-            val daysBack: Long = 35
+            val daysBack: Long = 3
             runBlocking(Executors.newFixedThreadPool(4).asCoroutineDispatcher()) {
                 val newFilings = getLatestFilings(LocalDate.now().minusDays(daysBack))
 
