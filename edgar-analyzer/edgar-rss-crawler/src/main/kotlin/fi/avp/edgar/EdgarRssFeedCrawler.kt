@@ -6,6 +6,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.litote.kmongo.coroutine.replaceOne
+import org.litote.kmongo.dayOfMonth
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.runApplication
 import org.springframework.scheduling.annotation.EnableScheduling
@@ -27,12 +28,20 @@ import kotlin.let
 @SpringBootApplication
 open class RssCrawlerApplication {
 
+
     @Component
     open class CurrentIndexCrawler {
 
+        var daysBack: Long = -1
+
         @Scheduled(fixedRate = 24 * 60 * 60 * 1000)
         fun crawl() {
-            val daysBack: Long = 3
+            // TODO - it's a hack for restarts
+            if (daysBack < 0) {
+                daysBack = 21
+            } else {
+                daysBack = 3
+            }
             runBlocking(Executors.newFixedThreadPool(4).asCoroutineDispatcher()) {
                 val newFilings = getLatestFilings(LocalDate.now().minusDays(daysBack))
 
