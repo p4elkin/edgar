@@ -84,7 +84,15 @@ suspend fun getLatestFilings(since: LocalDate): List<Filing> {
         .takeWhile { currentDate >= it }
         .toList()
         .mapAsync {
-            asyncGet("https://www.sec.gov/Archives/edgar/monthly/xbrlrss-${it.year}-${it.monthValue}.xml").let {
+            val monthValue = it.monthValue.let { monthNumber ->
+                if (monthNumber < 10) {
+                    "0$monthNumber"
+                } else {
+                    monthNumber.toString()
+                }
+            }
+
+            asyncGet("https://www.sec.gov/Archives/edgar/monthly/xbrlrss-${it.year}-${monthValue}.xml").let {
                 if (!it.isSuccessful) {
 //                    println("Failed to fetch RSS data: ${response.message} ${response.code}")
                     emptyList()
